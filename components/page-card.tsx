@@ -1,11 +1,9 @@
-import { useState } from 'react'
-import { Page, PageFeature } from '@/lib/types'
+import { Page } from '@/lib/types'
 import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import Editor from '@monaco-editor/react'
 
 interface PageCardProps {
   page: Page
@@ -13,31 +11,10 @@ interface PageCardProps {
 }
 
 export function PageCard({ page, onUpdate }: PageCardProps) {
-  const handleAddFeature = () => {
-    const newFeature: PageFeature = {
-      id: `f${Date.now()}`,
-      name: '',
-      description: '',
-    }
+  const handleFeaturesMarkdownChange = (value: string) => {
     onUpdate({
       ...page,
-      features: [...page.features, newFeature],
-    })
-  }
-
-  const handleRemoveFeature = (id: string) => {
-    onUpdate({
-      ...page,
-      features: page.features.filter(f => f.id !== id),
-    })
-  }
-
-  const handleUpdateFeature = (id: string, field: 'name' | 'description', value: string) => {
-    onUpdate({
-      ...page,
-      features: page.features.map(f =>
-        f.id === id ? { ...f, [field]: value } : f
-      ),
+      featuresMarkdown: value,
     })
   }
 
@@ -49,7 +26,7 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
   }
 
   // 判斷頁面是否完全生成
-  const isFullyGenerated = page.features.length > 0 && page.layout
+  const isFullyGenerated = page.featuresMarkdown !== undefined && page.layout
   const isGenerating = !isFullyGenerated
 
   return (
@@ -81,47 +58,27 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
 
         {/* Features */}
         <div className="mb-4">
-          <h4 className="text-sm font-medium mb-2">功能列表</h4>
-          {page.features.length > 0 ? (
-            <div className="space-y-3">
-              {page.features.map((feature) => (
-                <Card key={feature.id} className="p-3 bg-gray-50">
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-2">
-                      <Input
-                        value={feature.name}
-                        onChange={(e) => handleUpdateFeature(feature.id, 'name', e.target.value)}
-                        placeholder="功能名稱（例如：搜尋餐廳）"
-                        className="text-sm font-medium"
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleRemoveFeature(feature.id)}
-                        className="h-9 w-9 flex-shrink-0"
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                    <Textarea
-                      value={feature.description}
-                      onChange={(e) => handleUpdateFeature(feature.id, 'description', e.target.value)}
-                      placeholder="功能描述"
-                      rows={2}
-                      className="text-xs"
-                    />
-                  </div>
-                </Card>
-              ))}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAddFeature}
-                className="w-full"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                新增功能
-              </Button>
+          <h4 className="text-sm font-medium mb-2">功能列表（Markdown）</h4>
+          {page.featuresMarkdown !== undefined ? (
+            <div className="border rounded-lg overflow-hidden">
+              <Editor
+                height="400px"
+                defaultLanguage="markdown"
+                value={page.featuresMarkdown}
+                onChange={(value) => handleFeaturesMarkdownChange(value || '')}
+                theme="light"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  wrappingIndent: 'indent',
+                  padding: { top: 16, bottom: 16 },
+                  suggest: { showWords: false },
+                  quickSuggestions: false,
+                }}
+              />
             </div>
           ) : (
             <div className="space-y-2">

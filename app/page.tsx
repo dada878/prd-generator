@@ -562,10 +562,20 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         const detailsData = await detailsResponse.json()
         const details = parseJsonSafely(detailsData.message)
 
+        // 將 features 轉換為 markdown 格式
+        const featuresMarkdown = details.features
+          .map((f: any) => `### ${f.name}\n${f.description}`)
+          .join('\n\n')
+
         // 立即更新這個頁面的詳細資訊
         setPages(prev => prev.map(p =>
           p.id === page.id
-            ? { ...p, features: details.features, layout: details.layout }
+            ? {
+                ...p,
+                features: details.features,
+                layout: details.layout,
+                featuresMarkdown
+              }
             : p
         ))
       }

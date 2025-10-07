@@ -24,6 +24,7 @@ export interface Page {
   urlPath: string
   description?: string // 頁面簡介
   features: PageFeature[]
+  featuresMarkdown?: string // 功能列表的 Markdown 格式
   layout: string // 描述 UI 排版架構
   notes?: string // 用戶補充的資訊
   deleted?: boolean // 是否標記為刪除
