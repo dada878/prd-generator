@@ -11,18 +11,18 @@ interface PRDModeSelectorProps {
 
 const MODES = [
   {
-    id: 'normal' as PRDMode,
-    icon: '📋',
-    name: '一般模式',
-    description: '完整的產品需求規劃，涵蓋所有功能與細節',
-    features: ['完整功能規劃', '詳細頁面設計', '全面性考量'],
-  },
-  {
     id: 'mvp' as PRDMode,
     icon: '🚀',
     name: 'MVP 模式',
     description: '最小可行性產品，專注核心功能與快速驗證',
     features: ['核心功能優先', '精簡頁面設計', '快速上線'],
+  },
+  {
+    id: 'normal' as PRDMode,
+    icon: '📋',
+    name: '一般模式',
+    description: '完整的產品需求規劃，涵蓋所有功能與細節',
+    features: ['完整功能規劃', '詳細頁面設計', '全面性考量'],
   },
 ]
 

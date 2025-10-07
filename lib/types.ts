@@ -4,6 +4,13 @@ export interface Message {
   options?: string[]
 }
 
+export interface Question {
+  id: string
+  type: 'single' | 'multiple' | 'boolean'
+  question: string
+  options: string[]
+}
+
 // Page-based types
 export interface PageFeature {
   id: string

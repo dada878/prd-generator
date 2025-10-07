@@ -7,7 +7,7 @@ import { parseJSON } from 'partial-json-parser'
 import { PageCard } from '@/components/page-card'
 import { PageListEditor } from '@/components/page-list-editor'
 import { QuestionCard } from '@/components/question-card'
-import { TechStackTemplateCard } from '@/components/tech-stack-template'
+import { TechStackTemplateCard, DEFAULT_TECH_STACK } from '@/components/tech-stack-template'
 import { PRDModeSelector } from '@/components/prd-mode-selector'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -50,8 +50,8 @@ export default function Home() {
   // 頁面相關
   const [pages, setPages] = useState<Page[]>([])
   const [finalPRD, setFinalPRD] = useState('')
-  const [techStack, setTechStack] = useState<TechStackTemplate | undefined>(undefined)
-  const [mode, setMode] = useState<PRDMode>('normal')
+  const [techStack, setTechStack] = useState<TechStackTemplate | undefined>(DEFAULT_TECH_STACK)
+  const [mode, setMode] = useState<PRDMode>('mvp')
 
   // Helper: Clean and extract JSON from response
   const cleanJsonResponse = (text: string): string => {
@@ -228,6 +228,59 @@ export default function Home() {
       const questionsData = parseJsonSafely(data.message)
       setQuestions(questionsData.questions)
       setStage('questioning')
+    } catch (error) {
+      console.error('Error:', error)
+      alert('發生錯誤，請稍後再試')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Step 2.5: Generate more clarification questions based on current answers
+  const handleGenerateMoreQuestions = async () => {
+    setIsLoading(true)
+
+    try {
+      const formatAnswer = (answer: string | string[] | undefined) => {
+        if (!answer) return '未回答'
+        if (Array.isArray(answer)) {
+          return answer.length > 0 ? answer.join('、') : '未回答'
+        }
+        return answer
+      }
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: 'user',
+              content: `根據以下已經回答的需求澄清問題，生成更多深入的澄清問題：
+
+初始需求：${requirement}
+
+已回答的問題：
+${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])}`).join('\n\n')}
+
+請基於這些已有的資訊，生成 3-5 個更深入、更具體的澄清問題，幫助進一步理解產品需求。`,
+            },
+          ],
+          mode: 'analyze',
+          prdMode: mode,
+        }),
+      })
+
+      const data = await response.json()
+      const questionsData = parseJsonSafely(data.message)
+
+      // 將新問題添加到現有問題列表中
+      const newQuestions = questionsData.questions.map((q: Question, index: number) => ({
+        ...q,
+        id: `q${questions.length + index + 1}`, // 確保 ID 不重複
+      }))
+
+      setQuestions([...questions, ...newQuestions])
     } catch (error) {
       console.error('Error:', error)
       alert('發生錯誤，請稍後再試')
@@ -575,6 +628,29 @@ export default function Home() {
                   className="text-base"
                 />
               </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">💡 或試試範例：</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { emoji: '🍽️', prompt: '餐廳訂位網站' },
+                    { emoji: '📝', prompt: '待辦事項網站' },
+                    { emoji: '🎓', prompt: '線上課程平台' },
+                    { emoji: '🏋️', prompt: '健身記錄網站' },
+                  ].map((example, index) => (
+                    <Button
+                      key={index}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRequirement(`幫我做一個${example.prompt}`)}
+                      className="text-xs"
+                    >
+                      {example.emoji} {example.prompt}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
               <Button
                 onClick={handleGenerateInitialPRD}
                 disabled={isLoading || !requirement.trim()}
@@ -594,33 +670,6 @@ export default function Home() {
           <TechStackTemplateCard template={techStack} onChange={setTechStack} />
 
           <PRDModeSelector mode={mode} onChange={setMode} />
-
-          <div>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">
-              💡 或試試範例
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {[
-                { emoji: '🍽️', title: '餐廳訂位網站', prompt: '幫我做一個餐廳訂位網站' },
-                { emoji: '📝', title: '待辦事項網站', prompt: '做一個管理待辦事項的網站' },
-                { emoji: '🎓', title: '線上課程平台', prompt: '想做線上課程平台' },
-                { emoji: '🏋️', title: '健身記錄網站', prompt: '幫我做健身記錄的網站' },
-              ].map((example, index) => (
-                <Card
-                  key={index}
-                  className="p-4 cursor-pointer hover:border-primary transition-colors"
-                  onClick={() => {
-                    setRequirement(example.prompt)
-                  }}
-                >
-                  <h4 className="font-semibold mb-1">
-                    {example.emoji} {example.title}
-                  </h4>
-                  <p className="text-sm text-muted-foreground">{example.prompt}</p>
-                </Card>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 
@@ -774,7 +823,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             {questions.map((question) => (
               <QuestionCard
                 key={question.id}
@@ -786,11 +835,24 @@ export default function Home() {
           </div>
 
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setStage('initial-prd')} className="flex-1">
+            <Button variant="outline" onClick={() => setStage('initial-prd')}>
               返回初始 PRD
             </Button>
+            <Button
+              variant="secondary"
+              onClick={handleGenerateMoreQuestions}
+              disabled={isLoading}
+              className="flex-1"
+            >
+              {isLoading ? (
+                <div className="flex items-center gap-2">
+                  <Spinner size="sm" />
+                  <span>生成更多問題...</span>
+                </div>
+              ) : '繼續澄清'}
+            </Button>
             <Button onClick={handleGenerateRefinedPRD} className="flex-1" size="lg">
-              生成精煉 PRD
+              完成澄清
             </Button>
           </div>
         </div>
