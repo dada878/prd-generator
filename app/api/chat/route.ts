@@ -7,7 +7,7 @@ const openai = new OpenAI({
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, mode, techStack } = await req.json()
+    const { messages, mode, techStack, prdMode = 'normal', stream = false } = await req.json()
 
     const getTechStackConstraint = () => {
       if (!techStack || !techStack.locked) return ''
@@ -22,91 +22,298 @@ export async function POST(req: NextRequest) {
 請不要建議或使用任何不在此列表中的技術。`
     }
 
+    const getModeConstraint = () => {
+      if (prdMode === 'mvp') {
+        return `\n\n**MVP 模式約束**：
+此專案採用 MVP（最小可行性產品）開發方式，請遵守以下原則：
+1. **專注核心功能**：只保留最核心、最關鍵的功能，去除所有非必要的功能
+2. **簡化頁面設計**：減少頁面數量，每個頁面只實現最必要的互動
+3. **快速驗證**：目標是快速上線驗證產品概念，而非完整的功能體驗
+4. **精簡技術選型**：使用最簡單、最快速的技術方案
+5. **減少複雜度**：避免過度設計，保持架構簡單
+
+請在所有設計決策中優先考慮「最小可行」的原則。`
+      }
+      return ''
+    }
+
     const systemPrompts = {
-      draftPRD: `你是一個產品需求文件（PRD）撰寫專家。根據使用者提供的需求，生成完整的 PRD 文件。
-
-使用 CAST 框架（Context, Appearance, Structure, Tech Stack）格式，用繁體中文撰寫。
-請盡可能詳細地描述產品的各個方面，包含所有必要的細節和規格。${getTechStackConstraint()}`,
-
-      analyzeAssumptions: `你是一個需求分析專家。請比較「原始需求」和「生成的 PRD」，找出所有**功能性需求的猜測**。
-
-**重點**：
-- 只列出「具體功能、使用者類型、技術選擇、互動方式」等需要向用戶確認的猜測
-- **不要列出**：產業背景描述、市場趨勢分析、通用的設計原則等鋪陳性內容
-
-**應該列為猜測的範例**：
-✅ 目標用戶是個人還是企業
-✅ 需要會員系統嗎
-✅ 支援手機 App 還是只要網頁
-✅ 需要金流功能嗎
-✅ 需要後台管理系統嗎
-
-**不應該列為猜測的範例**：
-❌ 「隨著餐飲業數位化趨勢...」（產業背景）
-❌ 「採用響應式設計提升體驗」（通用設計原則）
-❌ 「確保資料安全性」（基本要求）
+      // 階段 0：分析需求並生成澄清問題
+      analyze: `你是一位專業的產品需求分析師。分析使用者提供的模糊需求，生成關鍵澄清問題。
 
 **重要**：請直接回傳純 JSON 格式，不要包含 \`\`\`json 或任何 markdown 標記。
 
-JSON 格式：
-{
-  "assumptions": [
-    {
-      "id": "唯一ID（例如：a1, a2）",
-      "category": "background/feature/interaction/output/tech",
-      "point": "PRD 中的具體功能或選擇",
-      "reasoning": "原始需求中缺少此資訊"
-    }
-  ]
-}`,
+**問題設計原則**：
+1. **優先釐清產品定位與用戶**：先理解「為什麼做」、「給誰用」、「解決什麼問題」
+2. **聚焦核心功能**：避免過早探討邊緣功能，專注於產品的核心功能
+3. **由淺入深**：從產品背景到功能細節，循序漸進
+4. **具體且可執行**：問題要能幫助使用者明確產品範圍，避免模糊抽象
 
-      generateQuestions: `你是一個需求澄清專家。根據剛才分析出的猜測點，為每個猜測點生成對應的澄清問題。
-
-請根據問題性質生成不同類型的問題：
+**問題類型**：
 - **single（單選）**: 只能選一個答案的問題，提供 2-4 個選項
 - **multiple（多選）**: 可以選多個答案的問題，提供 3-6 個選項
 - **open（開放式）**: 需要自由輸入的問題，不提供選項（options 為空陣列）
 
-**重要**：請直接回傳純 JSON 格式，不要包含 \`\`\`json 或任何 markdown 標記。
+**必須涵蓋的核心問題**（至少包含以下方向）：
+- 目標用戶是誰？（職業、年齡、使用情境等）
+- 要解決的核心問題是什麼？
+- 核心功能有哪些？優先級如何？
+- 具體的功能細節（例如：需要哪些篩選條件？支援哪些支付方式？）
 
 JSON 格式：
 {
   "questions": [
     {
       "id": "唯一ID（例如：q1, q2）",
-      "assumptionId": "對應的猜測點 ID",
-      "category": "background/feature/interaction/output/tech",
+      "category": "background/feature/interaction/output",
       "type": "single/multiple/open",
       "question": "問題內容",
       "options": ["選項1", "選項2", "選項3"] // 開放式問題使用空陣列 []
     }
   ]
-}`,
+}
 
-      generatePRD: `你是一個產品需求文件（PRD）撰寫專家。根據：
-1. 初步 PRD 草稿
-2. 猜測點列表
-3. 使用者的澄清回答
+生成 5-8 個問題，前 2-3 個問題必須聚焦於產品定位與背景（產品目的、願景、要解決的問題、目標用戶），後續問題再深入功能與互動細節。`,
 
-生成最終的、完整的、精確的 PRD 文件。
+      // 階段 1：生成初始 PRD
+      generateInitialPRD: `你是一位專業的產品經理，擅長撰寫清晰、聚焦的產品需求文件（PRD）。
 
-使用 CAST 框架（Context, Appearance, Structure, Tech Stack）格式，用繁體中文撰寫。
-確保所有之前的猜測都已根據用戶回答進行修正。${getTechStackConstraint()}`,
+**任務**：根據使用者提供的模糊需求，生成一份初步的 PRD 文件，幫助使用者快速理解產品方向。
+
+**撰寫原則**：
+1. **需求優先**：先說明為什麼要做這個產品、解決什麼問題、目標用戶是誰
+2. **MVP 思維**：專注於核心功能，避免過度複雜的設計，能用簡單方式實現就不要複雜化
+3. **具體可執行**：描述要具體，讓開發者能理解要做什麼
+4. **避免冗餘**：不需要開發週期、人力配置、風險評估等內容
+
+**使用 CAST 框架**：
+- **Context（背景與目標）**：產品背景、目標用戶、要解決的問題
+- **Appearance（外觀與體驗）**：整體視覺風格、使用者體驗方向
+- **Structure（功能結構）**：核心功能、頁面架構、使用者流程
+- **Tech Stack（技術選型）**：推薦的技術堆疊與理由
+
+保持簡潔專業，每個部分 2-4 段即可。文件風格：清晰、直接、以解決問題為導向。${getTechStackConstraint()}${getModeConstraint()}`,
+
+      // 階段 2：生成精煉後的 PRD
+      generateRefinedPRD: `你是一位專業的產品經理，擅長將使用者的需求澄清轉化為清晰的產品文件。
+
+**任務**：根據初始需求和問答記錄，生成一份精煉、完整的 PRD 文件。
+
+**撰寫原則**：
+1. **整合澄清資訊**：充分利用問答中得到的資訊，補充產品背景、用戶輪廓、功能優先級等細節
+2. **保持聚焦**：雖然比初始版更詳細，但仍要避免過度複雜，專注核心功能
+3. **需求清晰**：明確說明為什麼選擇這些功能、為什麼這樣設計
+4. **可執行性強**：讓開發團隊能直接根據這份文件開始工作
+5. **避免冗餘**：不需要開發週期、人力配置、風險評估等內容
+
+**使用 CAST 框架**：
+- **Context（背景與目標）**：產品背景、目標用戶畫像、核心問題
+- **Appearance（外觀與體驗）**：視覺風格定位、使用者體驗重點、介面設計原則
+- **Structure（功能結構）**：核心功能詳述、頁面架構、關鍵使用者流程、功能優先級
+- **Tech Stack（技術選型）**：技術堆疊選擇與理由、架構建議
+
+文件風格：專業、清晰、以解決問題為導向，比初始版更詳細但不冗長。${getTechStackConstraint()}${getModeConstraint()}`,
+
+      // 階段 1.5：PRD 對話調整
+      refinePRDChat: `你是一位專業的產品經理，正在與使用者溝通以完善 PRD 文件。
+
+**任務**：根據使用者的反饋意見，調整和優化當前的 PRD 內容。
+
+**重要原則**：
+1. **理解用戶意圖**：仔細理解用戶反饋的核心意思，不要生硬套用
+2. **精準調整**：只修改用戶提到的部分，保持其他內容不變
+3. **保持結構**：維持原有的 CAST 框架結構和格式
+4. **自然整合**：新內容要自然融入文件，不要顯得突兀
+5. **完整輸出**：輸出完整的 PRD 文件（不是只輸出修改的部分）
+
+**常見調整類型**：
+- 修正目標用戶定位（例如：從「個人用戶」改為「企業用戶」）
+- 調整產品規模（例如：從「多店家平台」改為「單店家系統」）
+- 簡化或擴展功能範圍
+- 修正產品目標或使用情境
+- 調整技術選型或架構建議
+
+請根據用戶的意見，輸出修改後的完整 PRD 文件，使用相同的 CAST 框架格式。${getTechStackConstraint()}${getModeConstraint()}`,
+
+      // 階段 3：生成頁面列表
+      generatePagesList: `你是一位產品架構設計專家，擅長規劃簡潔、高效的產品結構。
+
+**重要**：請直接回傳純 JSON 格式，不要包含 \`\`\`json 或任何 markdown 標記。
+
+**設計原則**：
+1. **以用戶流程為核心**：頁面應該對應用戶的主要使用路徑，而非堆砌功能
+2. **MVP 優先**：只保留核心必要的頁面，避免過度設計
+3. **功能導向**：優先規劃核心功能所需的頁面
+4. **避免重複**：如果兩個頁面功能相似，考慮合併
+
+對於每個頁面，只需包含：
+- id: 唯一識別碼
+- name: 頁面名稱（繁體中文，簡潔明確）
+- urlPath: URL 路徑（例如：/、/booking、/admin）
+- description: 頁面簡介（1-2 句話說明頁面的核心目的與功能）
+
+JSON 格式：
+{
+  "pages": [
+    {
+      "id": "page1",
+      "name": "首頁",
+      "urlPath": "/",
+      "description": "展示核心內容，引導用戶完成主要操作"
+    }
+  ]
+}
+
+**注意**：
+- 此階段不需要生成功能列表、UI 架構或 Mock HTML
+- 頁面數量建議控制在 3-8 個之間，除非產品確實複雜
+- 按業務優先級排序頁面${getTechStackConstraint()}${getModeConstraint()}`,
+
+      // 階段 2：為單一頁面生成詳細功能和 UI 架構
+      generatePageDetails: `你是一位產品設計專家，擅長將商業需求轉化為具體的功能設計。
+
+**重要**：請直接回傳純 JSON 格式，不要包含 \`\`\`json 或任何 markdown 標記。
+
+需要生成：
+- features: 該頁面的功能列表（陣列，每個功能包含 id, name, description）
+- layout: UI 排版架構描述（文字描述，例如：「頂部導航列 + 左側篩選器 + 右側卡片列表」）
+
+JSON 格式：
+{
+  "features": [
+    {
+      "id": "f1",
+      "name": "功能名稱",
+      "description": "功能描述"
+    }
+  ],
+  "layout": "頂部導航列 + 主視覺橫幅 + 三欄式內容區"
+}
+
+**功能設計原則**：
+1. **核心功能優先**：優先列出頁面的核心必要功能
+2. **用戶視角**：從用戶能完成什麼任務的角度描述，而非技術實現
+3. **MVP 思維**：專注必要功能，避免過度設計
+
+**功能列表要求**：
+- **簡潔但精準**：每個功能名稱應該是 2-6 個字的動詞+名詞組合（例如：搜尋餐廳、篩選日期、查看訂單）
+- **描述精煉**：description 保持在 15-25 字以內，只說明核心功能與用途
+- 列出該頁面的核心互動功能（通常 3-6 個功能）
+- 避免過於細節的技術描述，專注於用戶能做什麼
+- 按用戶使用流程的優先級排序
+
+**UI 架構要求**：
+- 描述主要的區塊劃分（例如：「頂部搜尋列 + 左側分類 + 右側商品網格」）
+- 保持在 20-30 字以內
+- 說明內容的組織方式，體現資訊的優先級
+- 考慮用戶的視覺動線與操作流程${getTechStackConstraint()}${getModeConstraint()}`,
+
+      // 階段 3：為單一頁面生成 Mock HTML
+      generatePageMock: `根據頁面的功能列表和 UI 架構，生成完整的 Mock HTML。
+
+請直接回傳純 JSON 格式（不要包含 \`\`\`json 標記）：
+{
+  "mockHtml": "<div>...</div>"
+}
+
+使用 Tailwind CSS，HTML 屬性用單引號（class='...'），可用 emoji 作為圖標。生成豐富完整的頁面內容，充分展現所有功能。${getTechStackConstraint()}${getModeConstraint()}`,
+
+      // 最終階段：生成 PRD
+      generatePRD: `你是一位資深產品經理，擅長撰寫專業、清晰、可執行的產品需求文件（PRD）。
+
+**任務**：根據使用者提供的完整資訊，撰寫一份可直接交付開發團隊的完整 PRD 文件。
+
+**輸入資訊**：
+1. 原始需求與產品背景
+2. 所有頁面的詳細資訊（名稱、功能、UI 架構）
+3. 用戶對各頁面的補充說明
+4. 已移除的頁面及移除理由（如有）
+
+**撰寫原則**：
+1. **需求清晰**：明確說明產品要做什麼、目標用戶、要解決的問題
+2. **結構完整**：使用 CAST 框架，涵蓋所有必要資訊
+3. **可執行性強**：開發團隊能直接根據此文件開始工作，不需要額外澄清
+4. **專業但易讀**：語言專業但不冗長，重點突出
+5. **避免冗餘**：不需要開發週期、人力配置、風險評估等內容
+6. **專注需求與功能**：重點放在產品需求和功能描述，而非商業策略
+
+**使用 CAST 框架**：
+
+**1. Context（背景與目標）**
+- 產品背景：為什麼要做這個產品
+- 目標用戶：詳細的用戶畫像
+- 核心問題：要解決的關鍵痛點
+
+**2. Appearance（外觀與體驗）**
+- 整體視覺風格定位
+- 使用者體驗重點與原則
+- 設計語言與品牌調性
+
+**3. Structure（功能結構）**
+- 產品架構概述
+- 以頁面為單位詳細說明，每個頁面包含：
+  * 頁面名稱與 URL 路徑
+  * 頁面目的與功能
+  * 核心功能列表（包含功能描述）
+  * UI 排版架構
+  * 用戶補充的特殊需求（如有）
+- 關鍵使用者流程說明
+- 功能優先級（如適用）
+
+**4. Tech Stack（技術選型）**
+- 推薦的技術堆疊與選擇理由
+- 架構建議
+- 技術考量與建議
+
+**特殊說明**：
+- 如果有已移除的頁面，請在 Context 或 Structure 末尾說明哪些頁面在規劃過程中被移除及原因，這有助於了解產品演進過程
+- 確保文件的邏輯連貫性，讓讀者能清楚理解產品的全貌
+
+請生成完整、專業的 PRD 文件，使用繁體中文撰寫。${getTechStackConstraint()}${getModeConstraint()}`,
     }
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         {
           role: 'system',
-          content: systemPrompts[mode as keyof typeof systemPrompts] || systemPrompts.analyze,
+          content: systemPrompts[mode as keyof typeof systemPrompts] || systemPrompts.generatePagesList,
         },
         ...messages,
       ],
+      stream,
     })
 
+    // 如果是串流模式
+    if (stream) {
+      const encoder = new TextEncoder()
+      const customReadable = new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const chunk of completion as any) {
+              const content = chunk.choices[0]?.delta?.content || ''
+              if (content) {
+                controller.enqueue(encoder.encode(content))
+              }
+            }
+            controller.close()
+          } catch (error) {
+            controller.error(error)
+          }
+        },
+      })
+
+      return new Response(customReadable, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Transfer-Encoding': 'chunked',
+        },
+      })
+    }
+
+    // 非串流模式
     return NextResponse.json({
-      message: completion.choices[0].message.content,
+      message: (completion as any).choices[0].message.content,
     })
   } catch (error) {
     console.error('API Error:', error)

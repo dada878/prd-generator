@@ -3,44 +3,104 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AssumptionCard } from '@/components/assumption-card'
+import { parseJSON } from 'partial-json-parser'
+import { PageCard } from '@/components/page-card'
+import { PageListEditor } from '@/components/page-list-editor'
 import { QuestionCard } from '@/components/question-card'
 import { TechStackTemplateCard } from '@/components/tech-stack-template'
+import { PRDModeSelector } from '@/components/prd-mode-selector'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Progress } from '@/components/ui/progress'
-import { Question, Assumption, TechStackTemplate } from '@/lib/types'
+import { Page, TechStackTemplate, Question, PRDMode } from '@/lib/types'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
+import { Progress } from '@/components/ui/progress'
 
-type Stage = 'initial' | 'draftPRD' | 'assumptions' | 'questioning' | 'generating' | 'done'
+type Stage =
+  | 'initial'
+  | 'generating-initial-prd'
+  | 'initial-prd'
+  | 'generating-questions'
+  | 'questioning'
+  | 'generating-refined-prd'
+  | 'refined-prd'
+  | 'generating-pages-list'
+  | 'editing-pages-list'
+  | 'generating-details'
+  | 'pages-complete'
+  | 'generating-final-prd'
+  | 'done'
 
 export default function Home() {
   const [requirement, setRequirement] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [stage, setStage] = useState<Stage>('initial')
+  const [progress, setProgress] = useState({ current: 0, total: 0, message: '' })
 
-  const [draftPRD, setDraftPRD] = useState('')
-  const [assumptions, setAssumptions] = useState<Assumption[]>([])
+  // 問答相關
   const [questions, setQuestions] = useState<Question[]>([])
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({})
+  const [initialPRD, setInitialPRD] = useState('')
+  const [refinedPRD, setRefinedPRD] = useState('')
+
+  // PRD 對話相關
+  const [prdChatInput, setPrdChatInput] = useState('')
+  const [prdChatHistory, setPrdChatHistory] = useState<Array<{ role: 'user' | 'assistant', content: string }>>([])
+
+  // 頁面相關
+  const [pages, setPages] = useState<Page[]>([])
   const [finalPRD, setFinalPRD] = useState('')
   const [techStack, setTechStack] = useState<TechStackTemplate | undefined>(undefined)
+  const [mode, setMode] = useState<PRDMode>('normal')
 
-  // Helper: Clean JSON response (remove markdown code blocks)
+  // Helper: Clean and extract JSON from response
   const cleanJsonResponse = (text: string): string => {
-    return text
+    // 1. 移除 markdown 標記
+    let cleaned = text
       .replace(/```json\s*/g, '')
       .replace(/```\s*/g, '')
       .trim()
+
+    // 2. 裁切字串：從第一個 { 到最後一個 }
+    const firstBrace = cleaned.indexOf('{')
+    const lastBrace = cleaned.lastIndexOf('}')
+
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1)
+    }
+
+    return cleaned
   }
 
-  // Step 1: Generate draft PRD
-  const handleStartAnalysis = async () => {
+  // Helper: Parse JSON with partial-json-parser
+  const parseJsonSafely = (text: string): any => {
+    const cleaned = cleanJsonResponse(text)
+
+    try {
+      // 優先使用標準 JSON.parse
+      return JSON.parse(cleaned)
+    } catch (e) {
+      console.warn('Standard JSON.parse failed, using partial-json-parser...', e)
+      console.log('Problematic JSON:', cleaned.substring(0, 200))
+
+      try {
+        // 使用 partial-json-parser 處理不完整的 JSON
+        return parseJSON(cleaned)
+      } catch (e2) {
+        console.error('Both parsers failed:', e2)
+        throw e2
+      }
+    }
+  }
+
+  // Step 1: Generate initial PRD with streaming
+  const handleGenerateInitialPRD = async () => {
     if (!requirement.trim()) return
 
     setIsLoading(true)
+    setStage('generating-initial-prd')
+    setInitialPRD('') // 清空之前的內容
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -49,14 +109,34 @@ export default function Home() {
           messages: [
             { role: 'user', content: requirement },
           ],
-          mode: 'draftPRD',
+          mode: 'generateInitialPRD',
           techStack,
+          prdMode: mode,
+          stream: true,
         }),
       })
 
-      const data = await response.json()
-      setDraftPRD(data.message)
-      setStage('draftPRD')
+      if (!response.body) {
+        throw new Error('No response body')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        accumulatedText += chunk
+        setInitialPRD(accumulatedText)
+      }
+
+      setStage('initial-prd')
     } catch (error) {
       console.error('Error:', error)
       alert('發生錯誤，請稍後再試')
@@ -65,26 +145,59 @@ export default function Home() {
     }
   }
 
-  // Step 2: Analyze assumptions
-  const handleAnalyzeAssumptions = async () => {
+  // Step 1.5: Chat with PRD and refine it
+  const handlePRDChat = async () => {
+    if (!prdChatInput.trim()) return
+
     setIsLoading(true)
+    const userMessage = prdChatInput.trim()
+    setPrdChatInput('')
+
+    // 添加用戶訊息到歷史
+    const newHistory = [...prdChatHistory, { role: 'user' as const, content: userMessage }]
+    setPrdChatHistory(newHistory)
+
     try {
+      // 構建完整的對話上下文
+      const messages = [
+        { role: 'system', content: `當前 PRD 內容：\n${initialPRD}` },
+        ...newHistory.map(msg => ({ role: msg.role, content: msg.content })),
+      ]
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [
-            { role: 'user', content: `原始需求：${requirement}\n\nPRD 草稿：\n${draftPRD}` },
-          ],
-          mode: 'analyzeAssumptions',
+          messages,
+          mode: 'refinePRDChat',
+          techStack,
+          prdMode: mode,
+          stream: true,
         }),
       })
 
-      const data = await response.json()
-      const cleanedMessage = cleanJsonResponse(data.message)
-      const assumptionsData = JSON.parse(cleanedMessage)
-      setAssumptions(assumptionsData.assumptions)
-      setStage('assumptions')
+      if (!response.body) {
+        throw new Error('No response body')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        accumulatedText += chunk
+        setInitialPRD(accumulatedText)
+      }
+
+      // 添加 AI 回應到歷史（簡化版，只記錄修改了 PRD）
+      setPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新 PRD' }])
     } catch (error) {
       console.error('Error:', error)
       alert('發生錯誤，請稍後再試')
@@ -93,27 +206,26 @@ export default function Home() {
     }
   }
 
-  // Step 3: Generate questions from assumptions
+  // Step 2: Generate clarification questions
   const handleGenerateQuestions = async () => {
     setIsLoading(true)
+    setStage('generating-questions')
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            {
-              role: 'user',
-              content: `猜測點列表：\n${assumptions.map(a => `- ${a.point} (${a.reasoning})`).join('\n')}`
-            },
+            { role: 'user', content: `分析以下需求並生成澄清問題：${requirement}` },
           ],
-          mode: 'generateQuestions',
+          mode: 'analyze',
+          prdMode: mode,
         }),
       })
 
       const data = await response.json()
-      const cleanedMessage = cleanJsonResponse(data.message)
-      const questionsData = JSON.parse(cleanedMessage)
+      const questionsData = parseJsonSafely(data.message)
       setQuestions(questionsData.questions)
       setStage('questioning')
     } catch (error) {
@@ -124,17 +236,11 @@ export default function Home() {
     }
   }
 
-  const handleAnswerChange = (questionId: string, answer: string | string[]) => {
-    setAnswers((prev) => ({
-      ...prev,
-      [questionId]: answer,
-    }))
-  }
-
-  // Step 4: Generate final PRD
-  const handleGenerateFinalPRD = async () => {
+  // Step 3: Generate refined PRD based on Q&A with streaming
+  const handleGenerateRefinedPRD = async () => {
     setIsLoading(true)
-    setStage('generating')
+    setStage('generating-refined-prd')
+    setRefinedPRD('') // 清空之前的內容
 
     try {
       const formatAnswer = (answer: string | string[] | undefined) => {
@@ -152,18 +258,259 @@ export default function Home() {
           messages: [
             {
               role: 'user',
-              content: `初步 PRD 草稿：\n${draftPRD}\n\n猜測點列表：\n${assumptions.map(a => `- ${a.point}`).join('\n')}\n\n澄清回答：\n${questions
+              content: `根據以下資訊生成精煉後的 PRD：\n初始需求：${requirement}\n\n問答記錄：\n${questions
                 .map((q) => `${q.question}\n答：${formatAnswer(answers[q.id])}`)
                 .join('\n\n')}`,
             },
           ],
-          mode: 'generatePRD',
+          mode: 'generateRefinedPRD',
           techStack,
+          prdMode: mode,
+          stream: true,
         }),
       })
 
-      const prdData = await response.json()
-      setFinalPRD(prdData.message)
+      if (!response.body) {
+        throw new Error('No response body')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        accumulatedText += chunk
+        setRefinedPRD(accumulatedText)
+      }
+
+      setStage('refined-prd')
+    } catch (error) {
+      console.error('Error:', error)
+      alert('發生錯誤，請稍後再試')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Step 4: Generate pages list (only basic info)
+  const handleGeneratePagesList = async () => {
+    if (!requirement.trim()) return
+
+    setIsLoading(true)
+    setStage('generating-pages-list')
+
+    try {
+      // 生成頁面列表
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'user', content: requirement },
+          ],
+          mode: 'generatePagesList',
+          techStack,
+          prdMode: mode,
+        }),
+      })
+
+      const data = await response.json()
+      const pagesListData = parseJsonSafely(data.message)
+
+      // 初始化頁面（只有基本資訊）
+      const initialPages: Page[] = pagesListData.pages.map((p: any) => ({
+        ...p,
+        features: [],
+        layout: '',
+        mockHtml: '',
+      }))
+
+      setPages(initialPages)
+      setStage('editing-pages-list')
+    } catch (error) {
+      console.error('Error:', error)
+      alert('發生錯誤，請稍後再試')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Step 2: Generate details for all pages
+  const handleGenerateDetails = async () => {
+    setIsLoading(true)
+    setStage('generating-details')
+
+    try {
+      // 過濾掉已刪除的頁面
+      const activePages = pages.filter(p => !p.deleted)
+
+      // 逐個生成頁面的完整資訊（詳細功能 + Mock UI）
+      for (let i = 0; i < activePages.length; i++) {
+        const page = activePages[i]
+
+        // 步驟 1: 生成功能列表和 UI 架構
+        setProgress({
+          current: i * 2 + 1,
+          total: activePages.length * 2,
+          message: `生成「${page.name}」的功能列表... (頁面 ${i + 1}/${activePages.length})`
+        })
+
+        // 組合 prompt，包含備註
+        const notesText = page.notes ? `\n\n用戶備註：${page.notes}` : ''
+        const detailsResponse = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'user',
+                content: `原始需求：${requirement}\n\n頁面資訊：\n名稱：${page.name}\nURL：${page.urlPath}\n描述：${page.description}${notesText}\n\n請為這個頁面生成詳細的功能列表和 UI 架構描述。`
+              },
+            ],
+            mode: 'generatePageDetails',
+            techStack,
+            prdMode: mode,
+          }),
+        })
+
+        const detailsData = await detailsResponse.json()
+        const details = parseJsonSafely(detailsData.message)
+
+        // 立即更新這個頁面的詳細資訊
+        setPages(prev => prev.map(p =>
+          p.id === page.id
+            ? { ...p, features: details.features, layout: details.layout }
+            : p
+        ))
+
+        // 步驟 2: 立即生成這個頁面的 Mock UI
+        setProgress({
+          current: i * 2 + 2,
+          total: activePages.length * 2,
+          message: `生成「${page.name}」的 UI Mock... (頁面 ${i + 1}/${activePages.length})`
+        })
+
+        const mockResponse = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'user',
+                content: `頁面資訊：\n名稱：${page.name}\n\n功能列表：\n${details.features.map((f: any) => `- ${f.name}: ${f.description}`).join('\n')}\n\nUI 架構：${details.layout}\n\n請生成這個頁面的 Mock HTML。`
+              },
+            ],
+            mode: 'generatePageMock',
+            techStack,
+            prdMode: mode,
+          }),
+        })
+
+        const mockData = await mockResponse.json()
+        const mock = parseJsonSafely(mockData.message)
+
+        // 立即更新這個頁面的 Mock HTML
+        setPages(prev => prev.map(p =>
+          p.id === page.id
+            ? { ...p, mockHtml: mock.mockHtml }
+            : p
+        ))
+      }
+
+      // 全部完成
+      setStage('pages-complete')
+      setProgress({ current: 0, total: 0, message: '' })
+    } catch (error) {
+      console.error('Error:', error)
+      alert('發生錯誤，請稍後再試')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Update page
+  const handleUpdatePage = (updatedPage: Page) => {
+    setPages(pages.map(p => p.id === updatedPage.id ? updatedPage : p))
+  }
+
+  // Handle answer change
+  const handleAnswerChange = (questionId: string, answer: string | string[]) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: answer,
+    }))
+  }
+
+  // Step 7: Generate final PRD with streaming
+  const handleGenerateFinalPRD = async () => {
+    setIsLoading(true)
+    setStage('generating-final-prd')
+    setFinalPRD('') // 清空之前的內容
+
+    try {
+      // 處理未刪除的頁面
+      const activePages = pages.filter(p => !p.deleted)
+      const pagesDescription = activePages
+        .map(p => {
+          const featuresText = p.features.map(f => `  - ${f.name}: ${f.description}`).join('\n')
+          const notesText = p.notes ? `\n  補充說明：${p.notes}` : ''
+          return `## ${p.name} (${p.urlPath})\n排版架構：${p.layout}\n功能：\n${featuresText}${notesText}`
+        })
+        .join('\n\n')
+
+      // 處理已刪除的頁面（讓 AI 知道哪些頁面被移除以及原因）
+      const deletedPages = pages.filter(p => p.deleted)
+      const deletedPagesInfo = deletedPages.length > 0
+        ? `\n\n## 已移除的頁面\n以下頁面在初期規劃後被移除：\n${deletedPages.map(p => {
+            const reasonText = p.deleteReason ? ` - 移除理由：${p.deleteReason}` : ''
+            return `- ${p.name} (${p.urlPath})${reasonText}`
+          }).join('\n')}`
+        : ''
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: 'user',
+              content: `原始需求：${requirement}\n\n頁面詳情：\n${pagesDescription}${deletedPagesInfo}`,
+            },
+          ],
+          mode: 'generatePRD',
+          techStack,
+          prdMode: mode,
+          stream: true,
+        }),
+      })
+
+      if (!response.body) {
+        throw new Error('No response body')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        accumulatedText += chunk
+        setFinalPRD(accumulatedText)
+      }
+
       setStage('done')
     } catch (error) {
       console.error('Error:', error)
@@ -185,28 +532,25 @@ export default function Home() {
 
   const handleReset = () => {
     setRequirement('')
-    setDraftPRD('')
-    setAssumptions([])
+    setPages([])
+    setFinalPRD('')
+    setInitialPRD('')
+    setRefinedPRD('')
+    setTechStack(undefined)
+    setMode('normal')
+    setStage('initial')
+    setProgress({ current: 0, total: 0, message: '' })
+    setPrdChatInput('')
+    setPrdChatHistory([])
     setQuestions([])
     setAnswers({})
-    setFinalPRD('')
-    setTechStack(undefined)
-    setStage('initial')
   }
 
-  const answeredCount = Object.values(answers).filter((a) => {
-    if (Array.isArray(a)) {
-      return a.length > 0
-    }
-    return typeof a === 'string' && a.trim()
-  }).length
-  const progress = questions.length > 0 ? (answeredCount / questions.length) * 100 : 0
-
   return (
-    <div className="flex flex-col h-screen max-w-6xl mx-auto p-6">
+    <div className="flex flex-col h-screen w-full p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">🧠 AI 需求澄清生成器</h1>
-        <p className="text-muted-foreground">先生成 PRD 草稿 → 分析猜測點 → 針對性提問 → 完善最終 PRD</p>
+        <h1 className="text-3xl font-bold mb-2">📄 Page-Based PRD Generator</h1>
+        <p className="text-muted-foreground">模糊需求 → 頁面列表 → 功能詳情 → Mock UI → 完整 PRD</p>
       </div>
 
       {/* Stage 1: Initial Input */}
@@ -219,20 +563,20 @@ export default function Home() {
                   請描述你想做什麼產品或功能？
                 </label>
                 <Input
-                  placeholder="例如：我想做一個幫人管理任務的 app"
+                  placeholder="例如：我想做一個餐廳訂位網站"
                   value={requirement}
                   onChange={(e) => setRequirement(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
-                      handleStartAnalysis()
+                      handleGeneratePages()
                     }
                   }}
                   className="text-base"
                 />
               </div>
               <Button
-                onClick={handleStartAnalysis}
+                onClick={handleGenerateInitialPRD}
                 disabled={isLoading || !requirement.trim()}
                 className="w-full"
                 size="lg"
@@ -240,14 +584,16 @@ export default function Home() {
                 {isLoading ? (
                   <div className="flex items-center gap-2">
                     <Spinner size="sm" />
-                    <span>生成 PRD 草稿中...</span>
+                    <span>分析需求中...</span>
                   </div>
-                ) : '開始生成 PRD 草稿'}
+                ) : '開始分析需求'}
               </Button>
             </div>
           </Card>
 
           <TechStackTemplateCard template={techStack} onChange={setTechStack} />
+
+          <PRDModeSelector mode={mode} onChange={setMode} />
 
           <div>
             <h3 className="text-sm font-medium text-muted-foreground mb-3">
@@ -263,7 +609,9 @@ export default function Home() {
                 <Card
                   key={index}
                   className="p-4 cursor-pointer hover:border-primary transition-colors"
-                  onClick={() => setRequirement(example.prompt)}
+                  onClick={() => {
+                    setRequirement(example.prompt)
+                  }}
                 >
                   <h4 className="font-semibold mb-1">
                     {example.emoji} {example.title}
@@ -276,18 +624,213 @@ export default function Home() {
         </div>
       )}
 
-      {/* Stage 2: Draft PRD */}
-      {stage === 'draftPRD' && (
+      {/* Stage 2: Generating Initial PRD */}
+      {stage === 'generating-initial-prd' && (
         <>
-          <Card className="flex-1 p-6 overflow-auto mb-4">
-            <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <p className="text-sm text-amber-800 dark:text-amber-200">
-                ⚠️ 以下是基於你的需求生成的 <strong>初步 PRD 草稿</strong>。這個草稿包含許多「猜測」和「假設」，因為資訊尚不完整。接下來我們會分析這些猜測點，並向你確認。
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Spinner size="sm" />
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                正在生成初始 PRD，請稍候...
               </p>
             </div>
+          </div>
+
+          <Card className="flex-1 p-6 overflow-auto">
             <div className="prose prose-slate dark:prose-invert max-w-none">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {draftPRD}
+                {initialPRD || '正在生成中...'}
+              </ReactMarkdown>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Stage 3: Initial PRD */}
+      {stage === 'initial-prd' && (
+        <>
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              ✅ 初始 PRD 已生成！你可以在下方與 AI 對話調整 PRD，或選擇進入下一階段。
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {/* Left: PRD Content */}
+            <Card className="p-6 overflow-auto">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {initialPRD}
+                </ReactMarkdown>
+              </div>
+            </Card>
+
+            {/* Right: Chat Interface */}
+            <div className="flex flex-col">
+              <Card className="flex-1 flex flex-col min-h-0">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">💬 與 AI 對話調整 PRD</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    例如：「這應該只需要給單一店家使用」
+                  </p>
+                </div>
+
+                {/* Chat History */}
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  {prdChatHistory.length === 0 && (
+                    <div className="text-center text-sm text-muted-foreground py-8">
+                      在此輸入你的意見，AI 會幫你調整 PRD
+                    </div>
+                  )}
+                  {prdChatHistory.map((msg, index) => (
+                    <div
+                      key={index}
+                      className={`p-3 rounded-lg ${
+                        msg.role === 'user'
+                          ? 'bg-primary text-primary-foreground ml-8'
+                          : 'bg-muted mr-8'
+                      }`}
+                    >
+                      <p className="text-sm">{msg.content}</p>
+                    </div>
+                  ))}
+                  {isLoading && (
+                    <div className="flex items-center gap-2 p-3 bg-muted rounded-lg mr-8">
+                      <Spinner size="sm" />
+                      <p className="text-sm text-muted-foreground">AI 正在調整 PRD...</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 border-t">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="輸入你的意見..."
+                      value={prdChatInput}
+                      onChange={(e) => setPrdChatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          handlePRDChat()
+                        }
+                      }}
+                      disabled={isLoading}
+                    />
+                    <Button
+                      onClick={handlePRDChat}
+                      disabled={isLoading || !prdChatInput.trim()}
+                      size="sm"
+                    >
+                      發送
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <Button variant="outline" onClick={handleReset} className="flex-1">
+              重新開始
+            </Button>
+            <Button onClick={handleGenerateQuestions} className="flex-1" size="lg">
+              需求澄清（推薦）
+            </Button>
+            <Button onClick={handleGeneratePagesList} className="flex-1" size="lg" variant="secondary">
+              直接進入頁面規劃
+            </Button>
+          </div>
+        </>
+      )}
+
+      {/* Stage 4: Generating Questions */}
+      {stage === 'generating-questions' && (
+        <Card className="p-8 text-center">
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <Spinner size="lg" className="text-primary" />
+            </div>
+            <h2 className="text-xl font-semibold">生成澄清問題...</h2>
+            <p className="text-sm text-muted-foreground">
+              正在分析需求並生成針對性的澄清問題...
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {/* Stage 5: Questioning */}
+      {stage === 'questioning' && (
+        <div className="space-y-4">
+          <div className="p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <h2 className="text-lg font-semibold mb-1 text-blue-900 dark:text-blue-100">
+              🤔 需求澄清 ({Object.values(answers).filter((a) => {
+                if (Array.isArray(a)) return a.length > 0
+                return typeof a === 'string' && a.trim()
+              }).length}/{questions.length})
+            </h2>
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              請回答以下問題，幫助我們更好地理解你的需求
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {questions.map((question) => (
+              <QuestionCard
+                key={question.id}
+                question={question}
+                onAnswerChange={handleAnswerChange}
+                answer={answers[question.id]}
+              />
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setStage('initial-prd')} className="flex-1">
+              返回初始 PRD
+            </Button>
+            <Button onClick={handleGenerateRefinedPRD} className="flex-1" size="lg">
+              生成精煉 PRD
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Stage 6: Generating Refined PRD */}
+      {stage === 'generating-refined-prd' && (
+        <>
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Spinner size="sm" />
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                正在生成精煉 PRD，整合你的回答...
+              </p>
+            </div>
+          </div>
+
+          <Card className="flex-1 p-6 overflow-auto">
+            <div className="prose prose-slate dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {refinedPRD || '正在生成中...'}
+              </ReactMarkdown>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Stage 7: Refined PRD */}
+      {stage === 'refined-prd' && (
+        <>
+          <div className="mb-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+            <p className="text-sm text-green-800 dark:text-green-200">
+              ✅ 精煉 PRD 已生成！現在可以進入頁面規劃階段。
+            </p>
+          </div>
+
+          <Card className="flex-1 p-6 overflow-auto mb-4">
+            <div className="prose prose-slate dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {refinedPRD}
               </ReactMarkdown>
             </div>
           </Card>
@@ -296,130 +839,157 @@ export default function Home() {
             <Button variant="outline" onClick={handleReset} className="flex-1">
               重新開始
             </Button>
-            <Button
-              onClick={handleAnalyzeAssumptions}
-              disabled={isLoading}
-              className="flex-1"
-              size="lg"
-            >
-              {isLoading ? (
-                <div className="flex items-center gap-2">
-                  <Spinner size="sm" />
-                  <span>分析猜測點中...</span>
-                </div>
-              ) : '分析猜測點'}
+            <Button onClick={handleGeneratePagesList} className="flex-1" size="lg">
+              進入頁面規劃
             </Button>
           </div>
         </>
       )}
 
-      {/* Stage 3: Assumptions */}
-      {stage === 'assumptions' && (
-        <>
-          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <h2 className="text-lg font-semibold mb-2 text-blue-900 dark:text-blue-100">
-              🔍 發現 {assumptions.length} 個猜測點
-            </h2>
-            <p className="text-sm text-blue-800 dark:text-blue-200">
-              以下是 PRD 草稿中所有的「猜測」和「假設」。接下來我們會針對每個猜測點向你提問，以確保 PRD 的準確性。
+      {/* Stage 8: Generating Pages List */}
+      {stage === 'generating-pages-list' && (
+        <Card className="p-8 text-center">
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <Spinner size="lg" className="text-primary" />
+            </div>
+            <h2 className="text-xl font-semibold">分析需求，生成頁面列表...</h2>
+            <p className="text-sm text-muted-foreground">
+              正在分析你的需求並規劃所需的頁面...
             </p>
           </div>
+        </Card>
+      )}
 
-          <ScrollArea className="flex-1 mb-4">
-            <div className="space-y-3 pr-4">
-              {assumptions.map((assumption, index) => (
-                <AssumptionCard
-                  key={assumption.id}
-                  assumption={assumption}
-                  index={index}
+      {/* Stage 9: Editing Pages List */}
+      {stage === 'editing-pages-list' && (
+        <div className="space-y-4">
+          <div className="p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <h2 className="text-lg font-semibold mb-1 text-blue-900 dark:text-blue-100">
+              📝 已生成 {pages.filter(p => !p.deleted).length} 個頁面
+            </h2>
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              請檢視並編輯頁面列表，你可以新增、移除或修改頁面資訊，也可以為每個頁面添加特殊需求備註
+            </p>
+          </div>
+          <PageListEditor
+            pages={pages}
+            onUpdate={setPages}
+            onConfirm={handleGenerateDetails}
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleReset} className="flex-1">
+              重新開始
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Stage 10: Generating Details */}
+      {stage === 'generating-details' && (
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                🔄 正在生成頁面詳細資訊
+              </h2>
+              <div className="flex items-center gap-2">
+                <Spinner size="sm" />
+                <span className="text-sm text-blue-800 dark:text-blue-200">
+                  {Math.round((progress.current / progress.total) * 100)}%
+                </span>
+              </div>
+            </div>
+            <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+              {progress.message}
+            </p>
+            <Progress value={(progress.current / progress.total) * 100} className="h-2" />
+          </div>
+
+          {/* Pages Grid Layout - Show pages as they generate */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid grid-cols-2 gap-6 p-6">
+              {pages.filter(p => !p.deleted).map((page) => (
+                <PageCard
+                  key={page.id}
+                  page={page}
+                  onUpdate={handleUpdatePage}
                 />
               ))}
             </div>
-          </ScrollArea>
+          </div>
+        </div>
+      )}
+
+      {/* Stage 11: Pages Complete */}
+      {stage === 'pages-complete' && (
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="mb-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+            <h2 className="text-lg font-semibold mb-1 text-green-900 dark:text-green-100">
+              ✅ 已完成 {pages.filter(p => !p.deleted).length} 個頁面
+            </h2>
+            <p className="text-sm text-green-800 dark:text-green-200">
+              所有頁面的詳細資訊和 UI Mock 已生成完成，請檢視每個頁面，你可以針對各頁面補充額外的需求說明
+            </p>
+          </div>
+
+          {/* Pages Grid Layout */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid grid-cols-2 gap-6 p-6">
+              {pages.filter(p => !p.deleted).map((page) => (
+                <PageCard
+                  key={page.id}
+                  page={page}
+                  onUpdate={handleUpdatePage}
+                />
+              ))}
+            </div>
+          </div>
 
           <div className="flex gap-2">
             <Button variant="outline" onClick={handleReset} className="flex-1">
               重新開始
             </Button>
             <Button
-              onClick={handleGenerateQuestions}
-              disabled={isLoading}
-              className="flex-1"
-              size="lg"
-            >
-              {isLoading ? (
-                <div className="flex items-center gap-2">
-                  <Spinner size="sm" />
-                  <span>生成澄清問題中...</span>
-                </div>
-              ) : '開始澄清問題'}
-            </Button>
-          </div>
-        </>
-      )}
-
-      {/* Stage 4: Questioning */}
-      {stage === 'questioning' && (
-        <>
-          <div className="mb-4 space-y-2">
-            <div className="flex justify-between items-center">
-              <div className="text-sm text-muted-foreground">
-                已回答 {answeredCount} / {questions.length} 個問題
-              </div>
-              <div className="text-sm font-medium">{Math.round(progress)}%</div>
-            </div>
-            <Progress value={progress} />
-          </div>
-
-          <ScrollArea className="flex-1">
-            <div className="space-y-4 pr-4 pb-4">
-              {questions.map((question) => (
-                <QuestionCard
-                  key={question.id}
-                  question={question}
-                  onAnswerChange={handleAnswerChange}
-                  answer={answers[question.id]}
-                />
-              ))}
-            </div>
-          </ScrollArea>
-
-          <div className="mt-4 flex gap-2">
-            <Button variant="outline" onClick={handleReset} className="flex-1">
-              重新開始
-            </Button>
-            <Button
               onClick={handleGenerateFinalPRD}
-              disabled={isLoading || answeredCount === 0}
+              disabled={isLoading}
               className="flex-1"
               size="lg"
             >
               生成最終 PRD
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Stage 12: Generating Final PRD */}
+      {stage === 'generating-final-prd' && (
+        <>
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Spinner size="sm" />
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                正在生成最終 PRD，整合所有頁面資訊...
+              </p>
+            </div>
+          </div>
+
+          <Card className="flex-1 p-6 overflow-auto">
+            <div className="prose prose-slate dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {finalPRD || '正在生成中...'}
+              </ReactMarkdown>
+            </div>
+          </Card>
         </>
       )}
 
-      {/* Stage 5: Generating */}
-      {stage === 'generating' && (
-        <Card className="p-8 text-center">
-          <div className="space-y-4">
-            <div className="flex justify-center">
-              <Spinner size="lg" className="text-primary" />
-            </div>
-            <h2 className="text-xl font-semibold">正在生成最終 PRD 文件...</h2>
-            <p className="text-muted-foreground">根據你的澄清回答，我們正在完善 PRD...</p>
-            <Progress value={100} className="w-full" />
-          </div>
-        </Card>
-      )}
-
-      {/* Stage 6: Done */}
+      {/* Stage 13: Done */}
       {stage === 'done' && (
         <>
           <div className="mb-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
             <p className="text-sm text-green-800 dark:text-green-200">
-              ✅ 最終 PRD 已生成！所有猜測點都已根據你的回答進行修正。
+              ✅ 完整 PRD 已生成！已整合所有 {pages.filter(p => !p.deleted).length} 個頁面的詳細資訊。
             </p>
           </div>
 
