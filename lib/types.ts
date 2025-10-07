@@ -49,3 +49,21 @@ export interface PRDData {
   techStack?: TechStackTemplate
   mode?: PRDMode
 }
+
+export interface Project {
+  id: string
+  name: string
+  description?: string
+  requirement: string
+  initialPRD?: string
+  refinedPRD?: string
+  finalPRD?: string
+  pages: Page[]
+  questions?: Question[]
+  answers?: Record<string, string | string[]>
+  techStack?: TechStackTemplate
+  mode: PRDMode
+  userId?: string
+  createdAt: Date
+  updatedAt: Date
+}

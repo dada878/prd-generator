@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { parseJSON } from 'partial-json-parser'
@@ -15,7 +16,8 @@ import { Page, TechStackTemplate, Question, PRDMode } from '@/lib/types'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
 import { Progress } from '@/components/ui/progress'
-import { Copy } from 'lucide-react'
+import { Copy, Save, FolderOpen } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
 
 type Stage =
   | 'initial'
@@ -32,7 +34,22 @@ type Stage =
   | 'generating-final-prd'
   | 'done'
 
-export default function Home() {
+// 步驟定義
+const steps = [
+  { id: 'initial', name: '輸入需求', stages: ['initial', 'generating-initial-prd'] },
+  { id: 'initial-prd', name: '初始 PRD', stages: ['initial-prd'] },
+  { id: 'questioning', name: '需求澄清', stages: ['generating-questions', 'questioning'] },
+  { id: 'refined-prd', name: '精煉 PRD', stages: ['generating-refined-prd', 'refined-prd'] },
+  { id: 'pages', name: '頁面規劃', stages: ['generating-pages-list', 'editing-pages-list', 'generating-details', 'pages-complete'] },
+  { id: 'done', name: '完成 PRD', stages: ['generating-final-prd', 'done'] },
+] as const
+
+export default function CreatePage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const projectId = searchParams.get('projectId')
+  const { toast } = useToast()
+
   const [requirement, setRequirement] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [stage, setStage] = useState<Stage>('initial')
@@ -57,6 +74,84 @@ export default function Home() {
   const [finalPRD, setFinalPRD] = useState('')
   const [techStack, setTechStack] = useState<TechStackTemplate | undefined>(DEFAULT_TECH_STACK)
   const [mode, setMode] = useState<PRDMode>('mvp')
+
+  // 專案相關
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
+  const [projectName, setProjectName] = useState('')
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+
+  // 步驟追蹤
+  const [maxReachedStep, setMaxReachedStep] = useState(0)
+
+  // 更新已到達的最遠步驟
+  useEffect(() => {
+    const currentStepIndex = steps.findIndex(step => step.stages.includes(stage))
+    if (currentStepIndex > maxReachedStep) {
+      setMaxReachedStep(currentStepIndex)
+    }
+  }, [stage])
+
+  // 載入專案或從 URL 取得需求
+  useEffect(() => {
+    if (projectId) {
+      loadProject(projectId)
+    } else {
+      const reqParam = searchParams.get('requirement')
+      if (reqParam) {
+        setRequirement(reqParam)
+      }
+    }
+  }, [projectId])
+
+  const loadProject = async (id: string) => {
+    try {
+      setIsLoading(true)
+      const response = await fetch(`/api/projects/${id}`)
+      if (!response.ok) {
+        throw new Error('Failed to load project')
+      }
+
+      const project = await response.json()
+
+      // 載入專案資料到 state
+      setCurrentProjectId(project.id)
+      setProjectName(project.name)
+      setRequirement(project.requirement)
+      setInitialPRD(project.initialPRD || '')
+      setRefinedPRD(project.refinedPRD || '')
+      setFinalPRD(project.finalPRD || '')
+      setPages(project.pages || [])
+      setQuestions(project.questions || [])
+      setAnswers(project.answers || {})
+      setTechStack(project.techStack)
+      setMode(project.mode)
+
+      // 根據專案狀態設定 stage 和 maxReachedStep
+      if (project.finalPRD) {
+        setStage('done')
+        setMaxReachedStep(5) // 最後一個步驟
+      } else if (project.pages.length > 0) {
+        setStage('pages-complete')
+        setMaxReachedStep(4) // 頁面規劃步驟
+      } else if (project.refinedPRD) {
+        setStage('refined-prd')
+        setMaxReachedStep(3) // 精煉 PRD 步驟
+      } else if (project.initialPRD) {
+        setStage('initial-prd')
+        setMaxReachedStep(1) // 初始 PRD 步驟
+      }
+    } catch (error) {
+      console.error('Error loading project:', error)
+      toast({
+        variant: 'destructive',
+        title: '載入失敗',
+        description: '無法載入專案，請稍後再試',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Helper: Clean and extract JSON from response
   const cleanJsonResponse = (text: string): string => {
@@ -144,7 +239,11 @@ export default function Home() {
       setStage('initial-prd')
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '生成失敗',
+        description: '發生錯誤，請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -205,7 +304,11 @@ export default function Home() {
       setPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新 PRD' }])
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -266,7 +369,11 @@ export default function Home() {
       setRefinedPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新精煉 PRD' }])
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -327,7 +434,11 @@ export default function Home() {
       setFinalPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新完整 PRD' }])
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -357,7 +468,11 @@ export default function Home() {
       setStage('questioning')
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -410,7 +525,11 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       setQuestions([...questions, ...newQuestions])
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -473,7 +592,11 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       setStage('refined-prd')
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -515,7 +638,11 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       setStage('editing-pages-list')
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -585,7 +712,11 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       setProgress({ current: 0, total: 0, message: '' })
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -670,7 +801,11 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       setStage('done')
     } catch (error) {
       console.error('Error:', error)
-      alert('發生錯誤，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '發生錯誤',
+        description: '請稍後再試',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -689,10 +824,145 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(finalPRD)
-      alert('已複製到剪貼簿！')
+      toast({
+        title: '複製成功',
+        description: '已複製到剪貼簿',
+      })
     } catch (error) {
       console.error('Failed to copy:', error)
-      alert('複製失敗，請稍後再試')
+      toast({
+        variant: 'destructive',
+        title: '複製失敗',
+        description: '請稍後再試',
+      })
+    }
+  }
+
+  const generateProjectName = async () => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'user', content: requirement },
+          ],
+          mode: 'generateProjectName',
+        }),
+      })
+
+      const data = await response.json()
+      return data.message.trim()
+    } catch (error) {
+      console.error('Error generating project name:', error)
+      return ''
+    }
+  }
+
+  const handleOpenSaveDialog = async () => {
+    // 如果是新專案，先生成專案名稱
+    if (!currentProjectId) {
+      setIsSaving(true)
+      const generatedName = await generateProjectName()
+      setProjectName(generatedName || '')
+      setIsSaving(false)
+    }
+    setShowSaveDialog(true)
+  }
+
+  const handleSaveProject = async () => {
+    if (!projectName.trim()) {
+      toast({
+        variant: 'destructive',
+        title: '請輸入專案名稱',
+      })
+      return
+    }
+
+    try {
+      setIsSaving(true)
+
+      const projectData = {
+        name: projectName,
+        requirement,
+        initialPRD,
+        refinedPRD,
+        finalPRD,
+        pages,
+        questions,
+        answers,
+        techStack,
+        mode,
+      }
+
+      if (currentProjectId) {
+        // 更新現有專案
+        const response = await fetch(`/api/projects/${currentProjectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(projectData),
+        })
+
+        if (response.status === 403) {
+          toast({
+            variant: 'destructive',
+            title: '需要登入',
+            description: '請先登入才能儲存專案',
+          })
+          router.push('/login')
+          return
+        }
+
+        if (!response.ok) {
+          throw new Error('Failed to update project')
+        }
+
+        toast({
+          title: '專案已更新',
+          description: '您的專案已成功更新',
+        })
+      } else {
+        // 建立新專案
+        const response = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(projectData),
+        })
+
+        if (response.status === 403) {
+          toast({
+            variant: 'destructive',
+            title: '需要登入',
+            description: '請先登入才能儲存專案',
+          })
+          router.push('/login')
+          return
+        }
+
+        if (!response.ok) {
+          throw new Error('Failed to create project')
+        }
+
+        const newProject = await response.json()
+        setCurrentProjectId(newProject.id)
+        router.push(`/create?projectId=${newProject.id}`)
+
+        toast({
+          title: '專案已儲存',
+          description: '您的專案已成功儲存',
+        })
+      }
+
+      setShowSaveDialog(false)
+    } catch (error) {
+      console.error('Error saving project:', error)
+      toast({
+        variant: 'destructive',
+        title: '儲存失敗',
+        description: '無法儲存專案，請稍後再試',
+      })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -714,14 +984,199 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
     setFinalPrdChatHistory([])
     setQuestions([])
     setAnswers({})
+    setMaxReachedStep(0)
+  }
+
+  const getCurrentStep = () => {
+    return steps.findIndex(step => step.stages.includes(stage))
+  }
+
+  const handleGoToStep = (stepIndex: number) => {
+    const step = steps[stepIndex]
+    if (!step) return
+
+    // 根據 step id 設定對應的 stage
+    switch (step.id) {
+      case 'initial':
+        setStage('initial')
+        break
+      case 'initial-prd':
+        if (initialPRD) setStage('initial-prd')
+        break
+      case 'questioning':
+        if (questions.length > 0) setStage('questioning')
+        break
+      case 'refined-prd':
+        if (refinedPRD) setStage('refined-prd')
+        break
+      case 'pages':
+        if (pages.length > 0) {
+          if (pages.some(p => p.features.length > 0)) {
+            setStage('pages-complete')
+          } else {
+            setStage('editing-pages-list')
+          }
+        }
+        break
+      case 'done':
+        if (finalPRD) setStage('done')
+        break
+    }
   }
 
   return (
-    <div className="flex flex-col h-screen w-full p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">📄 Page-Based PRD Generator</h1>
-        <p className="text-muted-foreground">模糊需求 → 頁面列表 → 功能詳情 → Mock UI → 完整 PRD</p>
+    <>
+      <div className="mb-4 flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">
+            📄 Page-Based PRD Generator
+            {currentProjectId && projectName && (
+              <span className="text-lg font-normal text-muted-foreground ml-3">
+                - {projectName}
+              </span>
+            )}
+          </h1>
+          <p className="text-muted-foreground">模糊需求 → 頁面列表 → 功能詳情 → Mock UI → 完整 PRD</p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push('/projects')}
+          >
+            <FolderOpen className="h-4 w-4 mr-2" />
+            我的專案
+          </Button>
+          {stage !== 'initial' && (
+            <Button
+              onClick={handleOpenSaveDialog}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Spinner size="sm" className="mr-2" />
+                  {currentProjectId ? '更新中...' : '生成名稱中...'}
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  {currentProjectId ? '更新專案' : '儲存專案'}
+                </>
+              )}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* 步驟指示器 */}
+      {stage !== 'initial' && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
+            {steps.map((step, index) => {
+              const currentStepIndex = getCurrentStep()
+              const isActive = index === currentStepIndex
+              const isCompleted = index < currentStepIndex
+              const isFutureButReached = index > currentStepIndex && index <= maxReachedStep
+              const isClickable = index <= maxReachedStep
+
+              return (
+                <div key={step.id} className="flex items-center flex-1">
+                  <button
+                    onClick={() => isClickable && handleGoToStep(index)}
+                    disabled={!isClickable || isLoading}
+                    className={`flex items-center gap-2 ${
+                      isClickable && !isLoading ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed opacity-50'
+                    }`}
+                  >
+                    <div
+                      className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-colors ${
+                        isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : isCompleted
+                          ? 'bg-green-500 text-white'
+                          : isFutureButReached
+                          ? 'bg-orange-400 text-white'
+                          : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {isCompleted ? '✓' : isFutureButReached ? '→' : index + 1}
+                    </div>
+                    <span
+                      className={`text-sm font-medium ${
+                        isActive
+                          ? 'text-foreground'
+                          : isCompleted
+                          ? 'text-green-600'
+                          : isFutureButReached
+                          ? 'text-orange-600'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      {step.name}
+                    </span>
+                  </button>
+                  {index < steps.length - 1 && (
+                    <div
+                      className={`h-0.5 flex-1 mx-2 ${
+                        index < currentStepIndex ? 'bg-green-500' : 'bg-muted'
+                      }`}
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 儲存專案對話框 */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="p-6 w-full max-w-md">
+            <h2 className="text-xl font-semibold mb-4">
+              {currentProjectId ? '更新專案' : '儲存專案'}
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">
+                  專案名稱
+                </label>
+                <Input
+                  placeholder="例如：餐廳訂位系統"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      handleSaveProject()
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSaveDialog(false)}
+                  className="flex-1"
+                >
+                  取消
+                </Button>
+                <Button
+                  onClick={handleSaveProject}
+                  disabled={isSaving || !projectName.trim()}
+                  className="flex-1"
+                >
+                  {isSaving ? (
+                    <>
+                      <Spinner size="sm" className="mr-2" />
+                      儲存中...
+                    </>
+                  ) : currentProjectId ? '更新' : '儲存'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
 
       {/* Stage 1: Initial Input */}
       {stage === 'initial' && (
@@ -737,9 +1192,9 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                   value={requirement}
                   onChange={(e) => setRequirement(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()
-                      handleGeneratePages()
+                      handleGenerateInitialPRD()
                     }
                   }}
                   className="text-base"
@@ -919,7 +1374,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                       value={prdChatInput}
                       onChange={(e) => setPrdChatInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                           e.preventDefault()
                           handlePRDChat()
                         }
@@ -1139,7 +1594,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                       value={refinedPrdChatInput}
                       onChange={(e) => setRefinedPrdChatInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                           e.preventDefault()
                           handleRefinedPRDChat()
                         }
@@ -1410,7 +1865,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                       value={finalPrdChatInput}
                       onChange={(e) => setFinalPrdChatInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                           e.preventDefault()
                           handleFinalPRDChat()
                         }
@@ -1444,6 +1899,6 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
           </div>
         </>
       )}
-    </div>
+    </>
   )
 }
