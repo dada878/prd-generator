@@ -77,6 +77,9 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
                   padding: { top: 16, bottom: 16 },
                   suggest: { showWords: false },
                   quickSuggestions: false,
+                  scrollbar: {
+                    alwaysConsumeMouseWheel: false,
+                  },
                 }}
               />
             </div>
