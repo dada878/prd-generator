@@ -25,7 +25,6 @@ export interface Page {
   description?: string // 頁面簡介
   features: PageFeature[]
   layout: string // 描述 UI 排版架構
-  mockHtml: string // 簡易 HTML mock
   notes?: string // 用戶補充的資訊
   deleted?: boolean // 是否標記為刪除
   deleteReason?: string // 刪除理由

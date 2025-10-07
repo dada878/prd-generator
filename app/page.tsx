@@ -15,6 +15,7 @@ import { Page, TechStackTemplate, Question, PRDMode } from '@/lib/types'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
 import { Progress } from '@/components/ui/progress'
+import { Copy } from 'lucide-react'
 
 type Stage =
   | 'initial'
@@ -46,6 +47,10 @@ export default function Home() {
   // PRD 對話相關
   const [prdChatInput, setPrdChatInput] = useState('')
   const [prdChatHistory, setPrdChatHistory] = useState<Array<{ role: 'user' | 'assistant', content: string }>>([])
+  const [refinedPrdChatInput, setRefinedPrdChatInput] = useState('')
+  const [refinedPrdChatHistory, setRefinedPrdChatHistory] = useState<Array<{ role: 'user' | 'assistant', content: string }>>([])
+  const [finalPrdChatInput, setFinalPrdChatInput] = useState('')
+  const [finalPrdChatHistory, setFinalPrdChatHistory] = useState<Array<{ role: 'user' | 'assistant', content: string }>>([])
 
   // 頁面相關
   const [pages, setPages] = useState<Page[]>([])
@@ -198,6 +203,128 @@ export default function Home() {
 
       // 添加 AI 回應到歷史（簡化版，只記錄修改了 PRD）
       setPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新 PRD' }])
+    } catch (error) {
+      console.error('Error:', error)
+      alert('發生錯誤，請稍後再試')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Step 1.6: Chat with Refined PRD and adjust it
+  const handleRefinedPRDChat = async () => {
+    if (!refinedPrdChatInput.trim()) return
+
+    setIsLoading(true)
+    const userMessage = refinedPrdChatInput.trim()
+    setRefinedPrdChatInput('')
+
+    // 添加用戶訊息到歷史
+    const newHistory = [...refinedPrdChatHistory, { role: 'user' as const, content: userMessage }]
+    setRefinedPrdChatHistory(newHistory)
+
+    try {
+      // 構建完整的對話上下文
+      const messages = [
+        { role: 'system', content: `當前精煉 PRD 內容：\n${refinedPRD}` },
+        ...newHistory.map(msg => ({ role: msg.role, content: msg.content })),
+      ]
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages,
+          mode: 'refinePRDChat',
+          techStack,
+          prdMode: mode,
+          stream: true,
+        }),
+      })
+
+      if (!response.body) {
+        throw new Error('No response body')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        accumulatedText += chunk
+        setRefinedPRD(accumulatedText)
+      }
+
+      // 添加 AI 回應到歷史
+      setRefinedPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新精煉 PRD' }])
+    } catch (error) {
+      console.error('Error:', error)
+      alert('發生錯誤，請稍後再試')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Step 1.7: Chat with Final PRD and adjust it
+  const handleFinalPRDChat = async () => {
+    if (!finalPrdChatInput.trim()) return
+
+    setIsLoading(true)
+    const userMessage = finalPrdChatInput.trim()
+    setFinalPrdChatInput('')
+
+    // 添加用戶訊息到歷史
+    const newHistory = [...finalPrdChatHistory, { role: 'user' as const, content: userMessage }]
+    setFinalPrdChatHistory(newHistory)
+
+    try {
+      // 構建完整的對話上下文
+      const messages = [
+        { role: 'system', content: `當前完整 PRD 內容：\n${finalPRD}` },
+        ...newHistory.map(msg => ({ role: msg.role, content: msg.content })),
+      ]
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages,
+          mode: 'refinePRDChat',
+          techStack,
+          prdMode: mode,
+          stream: true,
+        }),
+      })
+
+      if (!response.body) {
+        throw new Error('No response body')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        accumulatedText += chunk
+        setFinalPRD(accumulatedText)
+      }
+
+      // 添加 AI 回應到歷史
+      setFinalPrdChatHistory([...newHistory, { role: 'assistant', content: '已根據你的意見更新完整 PRD' }])
     } catch (error) {
       console.error('Error:', error)
       alert('發生錯誤，請稍後再試')
@@ -382,7 +509,6 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         ...p,
         features: [],
         layout: '',
-        mockHtml: '',
       }))
 
       setPages(initialPages)
@@ -404,14 +530,14 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       // 過濾掉已刪除的頁面
       const activePages = pages.filter(p => !p.deleted)
 
-      // 逐個生成頁面的完整資訊（詳細功能 + Mock UI）
+      // 逐個生成頁面的完整資訊（詳細功能）
       for (let i = 0; i < activePages.length; i++) {
         const page = activePages[i]
 
-        // 步驟 1: 生成功能列表和 UI 架構
+        // 生成功能列表和 UI 架構
         setProgress({
-          current: i * 2 + 1,
-          total: activePages.length * 2,
+          current: i + 1,
+          total: activePages.length,
           message: `生成「${page.name}」的功能列表... (頁面 ${i + 1}/${activePages.length})`
         })
 
@@ -440,39 +566,6 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         setPages(prev => prev.map(p =>
           p.id === page.id
             ? { ...p, features: details.features, layout: details.layout }
-            : p
-        ))
-
-        // 步驟 2: 立即生成這個頁面的 Mock UI
-        setProgress({
-          current: i * 2 + 2,
-          total: activePages.length * 2,
-          message: `生成「${page.name}」的 UI Mock... (頁面 ${i + 1}/${activePages.length})`
-        })
-
-        const mockResponse = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            messages: [
-              {
-                role: 'user',
-                content: `頁面資訊：\n名稱：${page.name}\n\n功能列表：\n${details.features.map((f: any) => `- ${f.name}: ${f.description}`).join('\n')}\n\nUI 架構：${details.layout}\n\n請生成這個頁面的 Mock HTML。`
-              },
-            ],
-            mode: 'generatePageMock',
-            techStack,
-            prdMode: mode,
-          }),
-        })
-
-        const mockData = await mockResponse.json()
-        const mock = parseJsonSafely(mockData.message)
-
-        // 立即更新這個頁面的 Mock HTML
-        setPages(prev => prev.map(p =>
-          p.id === page.id
-            ? { ...p, mockHtml: mock.mockHtml }
             : p
         ))
       }
@@ -583,6 +676,16 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
     URL.revokeObjectURL(url)
   }
 
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(finalPRD)
+      alert('已複製到剪貼簿！')
+    } catch (error) {
+      console.error('Failed to copy:', error)
+      alert('複製失敗，請稍後再試')
+    }
+  }
+
   const handleReset = () => {
     setRequirement('')
     setPages([])
@@ -595,6 +698,10 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
     setProgress({ current: 0, total: 0, message: '' })
     setPrdChatInput('')
     setPrdChatHistory([])
+    setRefinedPrdChatInput('')
+    setRefinedPrdChatHistory([])
+    setFinalPrdChatInput('')
+    setFinalPrdChatHistory([])
     setQuestions([])
     setAnswers({})
   }
@@ -690,13 +797,51 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
             </div>
           </div>
 
-          <Card className="flex-1 p-6 overflow-auto">
-            <div className="prose prose-slate dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {initialPRD || '正在生成中...'}
-              </ReactMarkdown>
+          <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {/* Left: PRD Content */}
+            <Card className="p-6 overflow-auto">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {initialPRD || '正在生成中...'}
+                </ReactMarkdown>
+              </div>
+            </Card>
+
+            {/* Right: Chat Interface (Disabled) */}
+            <div className="flex flex-col">
+              <Card className="flex-1 flex flex-col min-h-0 opacity-50 cursor-not-allowed">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">💬 與 AI 對話調整 PRD</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    例如：「這應該只需要給單一店家使用」
+                  </p>
+                </div>
+
+                {/* Chat History */}
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  <div className="text-center text-sm text-muted-foreground py-8">
+                    在此輸入你的意見，AI 會幫你調整 PRD
+                  </div>
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 border-t">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="輸入你的意見..."
+                      disabled
+                    />
+                    <Button
+                      disabled
+                      size="sm"
+                    >
+                      發送
+                    </Button>
+                  </div>
+                </div>
+              </Card>
             </div>
-          </Card>
+          </div>
         </>
       )}
 
@@ -789,10 +934,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
               重新開始
             </Button>
             <Button onClick={handleGenerateQuestions} className="flex-1" size="lg">
-              需求澄清（推薦）
-            </Button>
-            <Button onClick={handleGeneratePagesList} className="flex-1" size="lg" variant="secondary">
-              直接進入頁面規劃
+              進入需求澄清
             </Button>
           </div>
         </>
@@ -875,13 +1017,51 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
             </div>
           </div>
 
-          <Card className="flex-1 p-6 overflow-auto">
-            <div className="prose prose-slate dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {refinedPRD || '正在生成中...'}
-              </ReactMarkdown>
+          <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {/* Left: PRD Content */}
+            <Card className="p-6 overflow-auto">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {refinedPRD || '正在生成中...'}
+                </ReactMarkdown>
+              </div>
+            </Card>
+
+            {/* Right: Chat Interface (Disabled) */}
+            <div className="flex flex-col">
+              <Card className="flex-1 flex flex-col min-h-0 opacity-50 cursor-not-allowed">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">💬 與 AI 對話調整 PRD</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    例如：「功能優先級需要調整」
+                  </p>
+                </div>
+
+                {/* Chat History */}
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  <div className="text-center text-sm text-muted-foreground py-8">
+                    在此輸入你的意見，AI 會幫你調整精煉 PRD
+                  </div>
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 border-t">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="輸入你的意見..."
+                      disabled
+                    />
+                    <Button
+                      disabled
+                      size="sm"
+                    >
+                      發送
+                    </Button>
+                  </div>
+                </div>
+              </Card>
             </div>
-          </Card>
+          </div>
         </>
       )}
 
@@ -890,19 +1070,86 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         <>
           <div className="mb-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
             <p className="text-sm text-green-800 dark:text-green-200">
-              ✅ 精煉 PRD 已生成！現在可以進入頁面規劃階段。
+              ✅ 精煉 PRD 已生成！你可以在下方與 AI 對話調整 PRD，或選擇進入頁面規劃階段。
             </p>
           </div>
 
-          <Card className="flex-1 p-6 overflow-auto mb-4">
-            <div className="prose prose-slate dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {refinedPRD}
-              </ReactMarkdown>
-            </div>
-          </Card>
+          <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {/* Left: PRD Content */}
+            <Card className="p-6 overflow-auto">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {refinedPRD}
+                </ReactMarkdown>
+              </div>
+            </Card>
 
-          <div className="flex gap-2">
+            {/* Right: Chat Interface */}
+            <div className="flex flex-col">
+              <Card className="flex-1 flex flex-col min-h-0">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">💬 與 AI 對話調整 PRD</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    例如：「功能優先級需要調整」
+                  </p>
+                </div>
+
+                {/* Chat History */}
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  {refinedPrdChatHistory.length === 0 && (
+                    <div className="text-center text-sm text-muted-foreground py-8">
+                      在此輸入你的意見，AI 會幫你調整精煉 PRD
+                    </div>
+                  )}
+                  {refinedPrdChatHistory.map((msg, index) => (
+                    <div
+                      key={index}
+                      className={`p-3 rounded-lg ${
+                        msg.role === 'user'
+                          ? 'bg-primary text-primary-foreground ml-8'
+                          : 'bg-muted mr-8'
+                      }`}
+                    >
+                      <p className="text-sm">{msg.content}</p>
+                    </div>
+                  ))}
+                  {isLoading && (
+                    <div className="flex items-center gap-2 p-3 bg-muted rounded-lg mr-8">
+                      <Spinner size="sm" />
+                      <p className="text-sm text-muted-foreground">AI 正在調整 PRD...</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 border-t">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="輸入你的意見..."
+                      value={refinedPrdChatInput}
+                      onChange={(e) => setRefinedPrdChatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          handleRefinedPRDChat()
+                        }
+                      }}
+                      disabled={isLoading}
+                    />
+                    <Button
+                      onClick={handleRefinedPRDChat}
+                      disabled={isLoading || !refinedPrdChatInput.trim()}
+                      size="sm"
+                    >
+                      發送
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          <div className="mt-4 flex gap-2">
             <Button variant="outline" onClick={handleReset} className="flex-1">
               重新開始
             </Button>
@@ -1041,13 +1288,51 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
             </div>
           </div>
 
-          <Card className="flex-1 p-6 overflow-auto">
-            <div className="prose prose-slate dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {finalPRD || '正在生成中...'}
-              </ReactMarkdown>
+          <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {/* Left: PRD Content */}
+            <Card className="p-6 overflow-auto">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {finalPRD || '正在生成中...'}
+                </ReactMarkdown>
+              </div>
+            </Card>
+
+            {/* Right: Chat Interface (Disabled) */}
+            <div className="flex flex-col">
+              <Card className="flex-1 flex flex-col min-h-0 opacity-50 cursor-not-allowed">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">💬 與 AI 對話調整 PRD</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    例如：「調整技術架構說明」
+                  </p>
+                </div>
+
+                {/* Chat History */}
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  <div className="text-center text-sm text-muted-foreground py-8">
+                    在此輸入你的意見，AI 會幫你調整完整 PRD
+                  </div>
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 border-t">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="輸入你的意見..."
+                      disabled
+                    />
+                    <Button
+                      disabled
+                      size="sm"
+                    >
+                      發送
+                    </Button>
+                  </div>
+                </div>
+              </Card>
             </div>
-          </Card>
+          </div>
         </>
       )}
 
@@ -1056,21 +1341,92 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         <>
           <div className="mb-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
             <p className="text-sm text-green-800 dark:text-green-200">
-              ✅ 完整 PRD 已生成！已整合所有 {pages.filter(p => !p.deleted).length} 個頁面的詳細資訊。
+              ✅ 完整 PRD 已生成！已整合所有 {pages.filter(p => !p.deleted).length} 個頁面的詳細資訊。你可以在下方與 AI 對話調整 PRD，或直接下載。
             </p>
           </div>
 
-          <Card className="flex-1 p-6 overflow-auto">
-            <div className="prose prose-slate dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {finalPRD}
-              </ReactMarkdown>
+          <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {/* Left: PRD Content */}
+            <Card className="p-6 overflow-auto">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {finalPRD}
+                </ReactMarkdown>
+              </div>
+            </Card>
+
+            {/* Right: Chat Interface */}
+            <div className="flex flex-col">
+              <Card className="flex-1 flex flex-col min-h-0">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">💬 與 AI 對話調整 PRD</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    例如：「調整技術架構說明」
+                  </p>
+                </div>
+
+                {/* Chat History */}
+                <div className="flex-1 overflow-auto p-4 space-y-3">
+                  {finalPrdChatHistory.length === 0 && (
+                    <div className="text-center text-sm text-muted-foreground py-8">
+                      在此輸入你的意見，AI 會幫你調整完整 PRD
+                    </div>
+                  )}
+                  {finalPrdChatHistory.map((msg, index) => (
+                    <div
+                      key={index}
+                      className={`p-3 rounded-lg ${
+                        msg.role === 'user'
+                          ? 'bg-primary text-primary-foreground ml-8'
+                          : 'bg-muted mr-8'
+                      }`}
+                    >
+                      <p className="text-sm">{msg.content}</p>
+                    </div>
+                  ))}
+                  {isLoading && (
+                    <div className="flex items-center gap-2 p-3 bg-muted rounded-lg mr-8">
+                      <Spinner size="sm" />
+                      <p className="text-sm text-muted-foreground">AI 正在調整 PRD...</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 border-t">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="輸入你的意見..."
+                      value={finalPrdChatInput}
+                      onChange={(e) => setFinalPrdChatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          handleFinalPRDChat()
+                        }
+                      }}
+                      disabled={isLoading}
+                    />
+                    <Button
+                      onClick={handleFinalPRDChat}
+                      disabled={isLoading || !finalPrdChatInput.trim()}
+                      size="sm"
+                    >
+                      發送
+                    </Button>
+                  </div>
+                </div>
+              </Card>
             </div>
-          </Card>
+          </div>
 
           <div className="mt-4 flex gap-2">
             <Button variant="outline" onClick={handleReset} className="flex-1">
               重新開始
+            </Button>
+            <Button onClick={handleCopy} variant="outline" size="lg">
+              <Copy className="h-4 w-4 mr-2" />
+              複製 PRD
             </Button>
             <Button onClick={handleDownload} className="flex-1" size="lg">
               📥 下載 PRD (Markdown)

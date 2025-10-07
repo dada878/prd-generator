@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Page } from '@/lib/types'
+import { Page, PageFeature } from '@/lib/types'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { PageMockPreview } from '@/components/page-mock-preview'
-import { Edit, Save, X, Loader2 } from 'lucide-react'
+import { Loader2, Plus, Trash2 } from 'lucide-react'
 
 interface PageCardProps {
   page: Page
@@ -13,24 +13,43 @@ interface PageCardProps {
 }
 
 export function PageCard({ page, onUpdate }: PageCardProps) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [notes, setNotes] = useState(page.notes || '')
-
-  const handleSave = () => {
+  const handleAddFeature = () => {
+    const newFeature: PageFeature = {
+      id: `f${Date.now()}`,
+      name: '',
+      description: '',
+    }
     onUpdate({
       ...page,
-      notes,
+      features: [...page.features, newFeature],
     })
-    setIsEditing(false)
   }
 
-  const handleCancel = () => {
-    setNotes(page.notes || '')
-    setIsEditing(false)
+  const handleRemoveFeature = (id: string) => {
+    onUpdate({
+      ...page,
+      features: page.features.filter(f => f.id !== id),
+    })
+  }
+
+  const handleUpdateFeature = (id: string, field: 'name' | 'description', value: string) => {
+    onUpdate({
+      ...page,
+      features: page.features.map(f =>
+        f.id === id ? { ...f, [field]: value } : f
+      ),
+    })
+  }
+
+  const handleNotesChange = (value: string) => {
+    onUpdate({
+      ...page,
+      notes: value,
+    })
   }
 
   // 判斷頁面是否完全生成
-  const isFullyGenerated = page.features.length > 0 && page.layout && page.mockHtml
+  const isFullyGenerated = page.features.length > 0 && page.layout
   const isGenerating = !isFullyGenerated
 
   return (
@@ -52,15 +71,6 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
                 {page.urlPath}
               </Badge>
             </div>
-            {!isEditing && isFullyGenerated && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsEditing(true)}
-              >
-                <Edit className="h-4 w-4" />
-              </Button>
-            )}
           </div>
           {page.layout ? (
             <p className="text-sm text-muted-foreground mt-2">{page.layout}</p>
@@ -69,35 +79,49 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
           )}
         </div>
 
-        {/* Mock Preview */}
-        <div className="mb-4">
-          <h4 className="text-sm font-medium mb-2">UI 預覽</h4>
-          {page.mockHtml ? (
-            <div className="h-[500px] rounded-lg border border-gray-200 overflow-hidden bg-white">
-              <PageMockPreview html={page.mockHtml} />
-            </div>
-          ) : (
-            <div className="h-[500px] bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
-              <div className="text-center">
-                <Loader2 className="h-10 w-10 text-blue-500 animate-spin mx-auto mb-3" />
-                <p className="text-sm font-medium text-gray-600">生成 UI Mock 中...</p>
-                <p className="text-xs text-gray-400 mt-1">請稍候</p>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Features */}
         <div className="mb-4">
           <h4 className="text-sm font-medium mb-2">功能列表</h4>
           {page.features.length > 0 ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {page.features.map((feature) => (
-                <div key={feature.id} className="text-sm">
-                  <div className="font-medium text-gray-900">{feature.name}</div>
-                  <div className="text-gray-600 text-xs">{feature.description}</div>
-                </div>
+                <Card key={feature.id} className="p-3 bg-gray-50">
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Input
+                        value={feature.name}
+                        onChange={(e) => handleUpdateFeature(feature.id, 'name', e.target.value)}
+                        placeholder="功能名稱（例如：搜尋餐廳）"
+                        className="text-sm font-medium"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveFeature(feature.id)}
+                        className="h-9 w-9 flex-shrink-0"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                    <Textarea
+                      value={feature.description}
+                      onChange={(e) => handleUpdateFeature(feature.id, 'description', e.target.value)}
+                      placeholder="功能描述"
+                      rows={2}
+                      className="text-xs"
+                    />
+                  </div>
+                </Card>
               ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAddFeature}
+                className="w-full"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                新增功能
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">
@@ -111,31 +135,13 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
         {/* Notes */}
         <div>
           <h4 className="text-sm font-medium mb-2">補充說明</h4>
-          {isEditing ? (
-            <div className="space-y-2">
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="針對這個頁面，你可以補充任何額外的需求或說明..."
-                rows={4}
-                className="text-sm"
-              />
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleSave}>
-                  <Save className="h-3 w-3 mr-1" />
-                  儲存
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleCancel}>
-                  <X className="h-3 w-3 mr-1" />
-                  取消
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="text-sm text-gray-600">
-              {page.notes || (isFullyGenerated ? '尚無補充說明' : '生成完成後可編輯')}
-            </div>
-          )}
+          <Textarea
+            value={page.notes || ''}
+            onChange={(e) => handleNotesChange(e.target.value)}
+            placeholder="針對這個頁面，你可以補充任何額外的需求或說明..."
+            rows={4}
+            className="text-sm"
+          />
         </div>
       </div>
     </Card>
