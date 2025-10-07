@@ -80,6 +80,7 @@ export function QuestionCard({ question, onAnswerChange, answer }: QuestionCardP
       feature: '⚙️ 功能層',
       interaction: '🎨 互動層',
       output: '📦 輸出層',
+      tech: '⚡ 技術層',
     }
     return labels[category as keyof typeof labels] || category
   }
