@@ -637,6 +637,11 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                     { emoji: '📝', prompt: '待辦事項網站' },
                     { emoji: '🎓', prompt: '線上課程平台' },
                     { emoji: '🏋️', prompt: '健身記錄網站' },
+                    { emoji: '🛒', prompt: '電商購物平台' },
+                    { emoji: '💰', prompt: '記帳理財工具' },
+                    { emoji: '✈️', prompt: '旅遊規劃平台' },
+                    { emoji: '👥', prompt: '社群交友網站' },
+                    { emoji: '📚', prompt: '電子書閱讀器' },
                   ].map((example, index) => (
                     <Button
                       key={index}

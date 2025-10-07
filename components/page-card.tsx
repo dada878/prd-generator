@@ -73,13 +73,11 @@ export function PageCard({ page, onUpdate }: PageCardProps) {
         <div className="mb-4">
           <h4 className="text-sm font-medium mb-2">UI 預覽</h4>
           {page.mockHtml ? (
-            <div className="h-[400px] overflow-hidden rounded-lg border border-gray-200">
-              <div className="transform scale-[0.4] origin-top-left w-[250%] h-[250%]">
-                <PageMockPreview html={page.mockHtml} />
-              </div>
+            <div className="h-[500px] rounded-lg border border-gray-200 overflow-hidden bg-white">
+              <PageMockPreview html={page.mockHtml} />
             </div>
           ) : (
-            <div className="h-[400px] bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
+            <div className="h-[500px] bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
               <div className="text-center">
                 <Loader2 className="h-10 w-10 text-blue-500 animate-spin mx-auto mb-3" />
                 <p className="text-sm font-medium text-gray-600">生成 UI Mock 中...</p>

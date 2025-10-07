@@ -199,14 +199,46 @@ JSON 格式：
 - 考慮用戶的視覺動線與操作流程${getTechStackConstraint()}${getModeConstraint()}`,
 
       // 階段 3：為單一頁面生成 Mock HTML
-      generatePageMock: `根據頁面的功能列表和 UI 架構，生成完整的 Mock HTML。
+      generatePageMock: `根據頁面的功能列表和 UI 架構，生成完整的 Mock HTML 文檔。
 
 請直接回傳純 JSON 格式（不要包含 \`\`\`json 標記）：
 {
-  "mockHtml": "<div>...</div>"
+  "mockHtml": "<!DOCTYPE html>..."
 }
 
-使用 Tailwind CSS，HTML 屬性用單引號（class='...'），可用 emoji 作為圖標。生成豐富完整的頁面內容，充分展現所有功能。${getTechStackConstraint()}${getModeConstraint()}`,
+**重要要求**：
+1. 生成完整的 HTML 文檔，包含 <!DOCTYPE html>, <html>, <head>, <body> 標籤
+2. 在 <head> 中的 <style> 標籤內撰寫完整的 CSS（不使用 Tailwind）
+3. 使用現代化的設計風格，參考以下設計系統：
+   - 顏色：使用柔和的配色（主色、輔助色、灰階）
+   - 字體：使用系統字體堆疊（font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', ...）
+   - 間距：使用一致的間距系統（4px, 8px, 16px, 24px, 32px...）
+   - 圓角：適度使用圓角（4px-8px）
+   - 陰影：使用細膩的陰影效果
+   - Hover 效果：為互動元素添加 hover 狀態
+4. 包含基礎的 CSS reset
+5. 使用語義化的 HTML 標籤
+6. 可用 emoji 作為圖標
+7. 生成豐富完整的頁面內容，充分展現所有功能
+8. 加入假資料讓頁面看起來真實（例如：假的商品、文章、使用者等）
+9. 確保所有 HTML 屬性使用雙引號（例如：class="..."）
+10. **圖片使用 Unsplash**：
+    - 使用 Unsplash 圖片作為 placeholder
+    - URL 格式：https://images.unsplash.com/photo-[id]?w=[寬度]&h=[高度]&fit=crop
+    - 範例：https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&h=300&fit=crop（美食）
+    - 其他分類範例：
+      * 美食：photo-1546069901-ba9599a7e63c
+      * 人物：photo-1507003211169-0a1dd7228f2d
+      * 風景：photo-1506905925346-21bda4d32df4
+      * 商品：photo-1523275335684-37898b6baf30
+      * 室內：photo-1556912173-3bb406ef7e77
+    - 根據頁面內容選擇合適的圖片分類和尺寸
+
+**設計風格參考**：
+- 簡潔現代的設計
+- 充足的留白
+- 清晰的視覺層級
+- 一致的配色和間距${getTechStackConstraint()}${getModeConstraint()}`,
 
       // 最終階段：生成 PRD
       generatePRD: `你是一位資深產品經理，擅長撰寫專業、清晰、可執行的產品需求文件（PRD）。

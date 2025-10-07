@@ -5,14 +5,12 @@ interface PageMockPreviewProps {
 
 export function PageMockPreview({ html, className = '' }: PageMockPreviewProps) {
   return (
-    <div
-      className={`border rounded-lg bg-white ${className}`}
-      style={{ transformOrigin: 'top left' }}
-    >
-      <div
-        className="w-full"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    </div>
+    <iframe
+      srcDoc={html}
+      className={`w-full h-full border-0 ${className}`}
+      sandbox="allow-same-origin"
+      style={{ pointerEvents: 'none' }}
+      title="Page Mock Preview"
+    />
   )
 }
