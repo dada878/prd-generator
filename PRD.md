@@ -1,4 +1,4 @@
-# 🧠 PRD：需求澄清生成器（Requirement Clarity Assistant）
+# 🧠 PRD：需求確認生成器（Requirement Clarity Assistant）
 
 ## **C — Context（產品情境）**
 

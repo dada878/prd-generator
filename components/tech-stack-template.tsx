@@ -38,7 +38,8 @@ export const DEFAULT_TECH_STACK: TechStackTemplate = {
 
 export function TechStackTemplateCard({ template, onChange }: TechStackTemplateProps) {
   const handleSelectPreset = (preset: Omit<TechStackTemplate, 'id' | 'locked'> & { icon?: string }) => {
-    const { icon, ...templateData } = preset
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { icon: _icon, ...templateData } = preset
     if (preset.name === '不限制') {
       onChange(undefined)
     } else {

@@ -5,7 +5,7 @@ import { auth } from '@/auth'
 // GET single project
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await auth()
@@ -18,8 +18,9 @@ export async function GET(
     }
 
     const userId = session.user.email
+    const { id } = await params
 
-    const docRef = db.collection('projects').doc(params.id)
+    const docRef = db.collection('projects').doc(id)
     const doc = await docRef.get()
 
     if (!doc.exists) {
@@ -57,7 +58,7 @@ export async function GET(
 // PATCH update project
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await auth()
@@ -70,8 +71,9 @@ export async function PATCH(
     }
 
     const userId = session.user.email
+    const { id } = await params
 
-    const docRef = db.collection('projects').doc(params.id)
+    const docRef = db.collection('projects').doc(id)
     const doc = await docRef.get()
 
     if (!doc.exists) {
@@ -119,7 +121,7 @@ export async function PATCH(
 // DELETE project
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await auth()
@@ -132,8 +134,9 @@ export async function DELETE(
     }
 
     const userId = session.user.email
+    const { id } = await params
 
-    const docRef = db.collection('projects').doc(params.id)
+    const docRef = db.collection('projects').doc(id)
     const doc = await docRef.get()
 
     if (!doc.exists) {

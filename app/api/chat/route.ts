@@ -85,7 +85,7 @@ JSON 格式：
 保持簡潔專業，每個部分 2-4 段即可。文件風格：清晰、直接、以解決問題為導向。${getTechStackConstraint()}${getModeConstraint()}`,
 
       // 階段 2：生成精煉後的 PRD
-      generateRefinedPRD: `你是一位專業的產品經理，擅長將使用者的需求澄清轉化為清晰的產品文件。
+      generateRefinedPRD: `你是一位專業的產品經理，擅長將使用者的需求確認轉化為清晰的產品文件。
 
 **任務**：根據初始需求和問答記錄，生成一份精煉、完整的 PRD 文件。
 
@@ -289,7 +289,7 @@ JSON 格式：
       const customReadable = new ReadableStream({
         async start(controller) {
           try {
-            for await (const chunk of completion as any) {
+            for await (const chunk of completion as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
               const content = chunk.choices[0]?.delta?.content || ''
               if (content) {
                 controller.enqueue(encoder.encode(content))
@@ -312,7 +312,7 @@ JSON 格式：
 
     // 非串流模式
     return NextResponse.json({
-      message: (completion as any).choices[0].message.content,
+      message: (completion as OpenAI.Chat.Completions.ChatCompletion).choices[0].message.content,
     })
   } catch (error) {
     console.error('API Error:', error)

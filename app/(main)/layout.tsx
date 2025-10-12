@@ -1,6 +1,8 @@
 import { UserHeader } from '@/components/user-header'
 import { Toaster } from '@/components/ui/toaster'
 
+export const dynamic = 'force-dynamic'
+
 export default function MainLayout({
   children,
 }: {

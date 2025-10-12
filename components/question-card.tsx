@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Question } from '@/lib/types'
 
@@ -12,7 +11,6 @@ interface QuestionCardProps {
 }
 
 export function QuestionCard({ question, onAnswerChange, answer }: QuestionCardProps) {
-  const [textInput, setTextInput] = useState('')
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
   const [customInput, setCustomInput] = useState('')
 
@@ -65,11 +63,6 @@ export function QuestionCard({ question, onAnswerChange, answer }: QuestionCardP
     const customItems = custom.trim() ? custom.split('、').filter(item => item.trim()) : []
     const allAnswers = [...options, ...customItems]
     onAnswerChange(question.id, allAnswers)
-  }
-
-  const handleTextChange = (value: string) => {
-    setTextInput(value)
-    onAnswerChange(question.id, value)
   }
 
   const getTypeLabel = (type: string) => {

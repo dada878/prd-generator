@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -16,7 +16,7 @@ import { Page, TechStackTemplate, Question, PRDMode } from '@/lib/types'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
 import { Progress } from '@/components/ui/progress'
-import { Copy, Save, FolderOpen } from 'lucide-react'
+import { Copy, Save } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 type Stage =
@@ -38,7 +38,7 @@ type Stage =
 const steps = [
   { id: 'initial', name: '輸入需求', stages: ['initial', 'generating-initial-prd'] },
   { id: 'initial-prd', name: '初始 PRD', stages: ['initial-prd'] },
-  { id: 'questioning', name: '需求澄清', stages: ['generating-questions', 'questioning'] },
+  { id: 'questioning', name: '需求確認', stages: ['generating-questions', 'questioning'] },
   { id: 'refined-prd', name: '精煉 PRD', stages: ['generating-refined-prd', 'refined-prd'] },
   { id: 'pages', name: '頁面規劃', stages: ['generating-pages-list', 'editing-pages-list', 'generating-details', 'pages-complete'] },
   { id: 'done', name: '完成 PRD', stages: ['generating-final-prd', 'done'] },
@@ -83,28 +83,112 @@ export default function CreatePage() {
 
   // 步驟追蹤
   const [maxReachedStep, setMaxReachedStep] = useState(0)
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
+  const [isAutoSaving, setIsAutoSaving] = useState(false)
 
   // 更新已到達的最遠步驟
   useEffect(() => {
-    const currentStepIndex = steps.findIndex(step => step.stages.includes(stage))
+    const currentStepIndex = steps.findIndex(step => (step.stages as readonly Stage[]).includes(stage))
     if (currentStepIndex > maxReachedStep) {
       setMaxReachedStep(currentStepIndex)
     }
-  }, [stage])
+  }, [stage, maxReachedStep])
 
-  // 載入專案或從 URL 取得需求
-  useEffect(() => {
-    if (projectId) {
-      loadProject(projectId)
-    } else {
-      const reqParam = searchParams.get('requirement')
-      if (reqParam) {
-        setRequirement(reqParam)
-      }
+  // 自動儲存函數
+  const autoSave = useCallback(async () => {
+    // 只有在已有專案 ID 且不在初始階段時才自動儲存
+    if (!currentProjectId || stage === 'initial' || isSaving || isAutoSaving) {
+      return
     }
-  }, [projectId])
 
-  const loadProject = async (id: string) => {
+    try {
+      setIsAutoSaving(true)
+      const projectData = {
+        name: projectName,
+        requirement,
+        initialPRD,
+        refinedPRD,
+        finalPRD,
+        pages,
+        questions,
+        answers,
+        techStack,
+        mode,
+      }
+
+      await fetch(`/api/projects/${currentProjectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(projectData),
+      })
+
+      setLastSavedAt(new Date())
+    } catch (error) {
+      console.error('Auto-save failed:', error)
+    } finally {
+      setIsAutoSaving(false)
+    }
+  }, [currentProjectId, stage, isSaving, isAutoSaving, projectName, requirement, initialPRD, refinedPRD, finalPRD, pages, questions, answers, techStack, mode])
+
+  // 自動儲存：每 30 秒自動儲存一次
+  useEffect(() => {
+    if (!currentProjectId || stage === 'initial') {
+      return
+    }
+
+    const interval = setInterval(() => {
+      autoSave()
+    }, 30000) // 30 秒
+
+    return () => clearInterval(interval)
+  }, [currentProjectId, stage, requirement, initialPRD, refinedPRD, finalPRD, pages, questions, answers, techStack, mode, projectName, autoSave])
+
+  // 當重要內容變化時，延遲 3 秒自動儲存
+  useEffect(() => {
+    if (!currentProjectId || stage === 'initial' || isSaving) {
+      return
+    }
+
+    const timer = setTimeout(() => {
+      autoSave()
+    }, 3000) // 3 秒 debounce
+
+    return () => clearTimeout(timer)
+  }, [initialPRD, refinedPRD, finalPRD, pages, answers, currentProjectId, stage, isSaving, autoSave])
+
+  // 每次 stage 變化時自動儲存
+  useEffect(() => {
+    if (!currentProjectId || stage === 'initial') {
+      return
+    }
+
+    autoSave()
+  }, [stage, currentProjectId, autoSave])
+
+  // 格式化儲存時間
+  const [, forceUpdate] = useState(0)
+  useEffect(() => {
+    if (!lastSavedAt) return
+
+    // 每分鐘更新一次時間顯示
+    const interval = setInterval(() => {
+      forceUpdate(prev => prev + 1)
+    }, 60000)
+
+    return () => clearInterval(interval)
+  }, [lastSavedAt])
+
+  const formatSavedTime = () => {
+    if (!lastSavedAt) return ''
+    const diff = new Date().getTime() - lastSavedAt.getTime()
+    if (diff < 60000) return '剛剛'
+    const minutes = Math.floor(diff / 60000)
+    if (minutes < 60) return `${minutes} 分鐘前`
+    const hours = Math.floor(minutes / 60)
+    return `${hours} 小時前`
+  }
+
+  const loadProject = useCallback(async (id: string) => {
     try {
       setIsLoading(true)
       const response = await fetch(`/api/projects/${id}`)
@@ -151,7 +235,19 @@ export default function CreatePage() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [toast])
+
+  // 載入專案或從 URL 取得需求
+  useEffect(() => {
+    if (projectId) {
+      loadProject(projectId)
+    } else {
+      const reqParam = searchParams.get('requirement')
+      if (reqParam) {
+        setRequirement(reqParam)
+      }
+    }
+  }, [projectId, searchParams, loadProject])
 
   // Helper: Clean and extract JSON from response
   const cleanJsonResponse = (text: string): string => {
@@ -173,7 +269,7 @@ export default function CreatePage() {
   }
 
   // Helper: Parse JSON with partial-json-parser
-  const parseJsonSafely = (text: string): any => {
+  const parseJsonSafely = (text: string): unknown => {
     const cleaned = cleanJsonResponse(text)
 
     try {
@@ -200,6 +296,11 @@ export default function CreatePage() {
     setIsLoading(true)
     setStage('generating-initial-prd')
     setInitialPRD('') // 清空之前的內容
+
+    // 先創建專案（如果還沒有 projectId）
+    if (!currentProjectId) {
+      await autoCreateProject('')
+    }
 
     try {
       const response = await fetch('/api/chat', {
@@ -246,6 +347,53 @@ export default function CreatePage() {
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  // 自動創建專案
+  const autoCreateProject = async (initialPRDContent: string) => {
+    try {
+      // 生成專案名稱
+      const generatedName = await generateProjectName()
+      const name = generatedName || '未命名專案'
+
+      const projectData = {
+        name,
+        requirement,
+        initialPRD: initialPRDContent,
+        refinedPRD: '',
+        finalPRD: '',
+        pages: [],
+        questions: [],
+        answers: {},
+        techStack,
+        mode,
+      }
+
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(projectData),
+      })
+
+      if (response.status === 403) {
+        // 未登入，不顯示錯誤，靜默失敗
+        return
+      }
+
+      if (response.ok) {
+        const newProject = await response.json()
+        console.log('Auto-created project:', newProject)
+        setCurrentProjectId(newProject.id)
+        setProjectName(name)
+        setLastSavedAt(new Date())
+
+        // 更新 URL 但不重新載入頁面
+        window.history.replaceState({}, '', `/create?projectId=${newProject.id}`)
+      }
+    } catch (error) {
+      console.error('Auto-create project failed:', error)
+      // 靜默失敗，不影響用戶體驗
     }
   }
 
@@ -463,7 +611,7 @@ export default function CreatePage() {
       })
 
       const data = await response.json()
-      const questionsData = parseJsonSafely(data.message)
+      const questionsData = parseJsonSafely(data.message) as { questions: Question[] }
       setQuestions(questionsData.questions)
       setStage('questioning')
     } catch (error) {
@@ -498,7 +646,7 @@ export default function CreatePage() {
           messages: [
             {
               role: 'user',
-              content: `根據以下已經回答的需求澄清問題，生成更多深入的澄清問題：
+              content: `根據以下已經回答的需求確認問題，生成更多深入的確認問題：
 
 初始需求：${requirement}
 
@@ -514,7 +662,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       })
 
       const data = await response.json()
-      const questionsData = parseJsonSafely(data.message)
+      const questionsData = parseJsonSafely(data.message) as { questions: Question[] }
 
       // 將新問題添加到現有問題列表中
       const newQuestions = questionsData.questions.map((q: Question, index: number) => ({
@@ -625,11 +773,15 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
       })
 
       const data = await response.json()
-      const pagesListData = parseJsonSafely(data.message)
+      const pagesListData = parseJsonSafely(data.message) as { pages: Partial<Page>[] }
 
       // 初始化頁面（只有基本資訊）
-      const initialPages: Page[] = pagesListData.pages.map((p: any) => ({
+      const initialPages: Page[] = pagesListData.pages.map((p: Partial<Page>) => ({
         ...p,
+        id: p.id || '',
+        name: p.name || '',
+        urlPath: p.urlPath || '',
+        description: p.description || '',
         features: [],
         layout: '',
       }))
@@ -687,11 +839,14 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         })
 
         const detailsData = await detailsResponse.json()
-        const details = parseJsonSafely(detailsData.message)
+        const details = parseJsonSafely(detailsData.message) as {
+          features: Array<{ id: string; name: string; description: string }>;
+          layout: string;
+        }
 
         // 將 features 轉換為 markdown 格式
         const featuresMarkdown = details.features
-          .map((f: any) => `### ${f.name}\n${f.description}`)
+          .map((f) => `### ${f.name}\n${f.description}`)
           .join('\n\n')
 
         // 立即更新這個頁面的詳細資訊
@@ -921,6 +1076,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
           title: '專案已更新',
           description: '您的專案已成功更新',
         })
+        setLastSavedAt(new Date())
       } else {
         // 建立新專案
         const response = await fetch('/api/projects', {
@@ -944,6 +1100,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         }
 
         const newProject = await response.json()
+        console.log('Created new project:', newProject)
         setCurrentProjectId(newProject.id)
         router.push(`/create?projectId=${newProject.id}`)
 
@@ -951,6 +1108,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
           title: '專案已儲存',
           description: '您的專案已成功儲存',
         })
+        setLastSavedAt(new Date())
       }
 
       setShowSaveDialog(false)
@@ -988,7 +1146,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
   }
 
   const getCurrentStep = () => {
-    return steps.findIndex(step => step.stages.includes(stage))
+    return steps.findIndex(step => (step.stages as readonly Stage[]).includes(stage))
   }
 
   const handleGoToStep = (stepIndex: number) => {
@@ -1036,33 +1194,42 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
               </span>
             )}
           </h1>
-          <p className="text-muted-foreground">模糊需求 → 頁面列表 → 功能詳情 → Mock UI → 完整 PRD</p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => router.push('/projects')}
-          >
-            <FolderOpen className="h-4 w-4 mr-2" />
-            我的專案
-          </Button>
+        <div className="flex items-center gap-3">
           {stage !== 'initial' && (
-            <Button
-              onClick={handleOpenSaveDialog}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <>
-                  <Spinner size="sm" className="mr-2" />
-                  {currentProjectId ? '更新中...' : '生成名稱中...'}
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  {currentProjectId ? '更新專案' : '儲存專案'}
-                </>
+            <>
+              <Button
+                onClick={handleOpenSaveDialog}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <>
+                    <Spinner size="sm" className="mr-2" />
+                    儲存中...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    儲存
+                  </>
+                )}
+              </Button>
+              {currentProjectId && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  {isAutoSaving ? (
+                    <>
+                      <Spinner size="sm" />
+                      <span>自動儲存中...</span>
+                    </>
+                  ) : lastSavedAt ? (
+                    <>
+                      <span className="text-green-600 dark:text-green-400">✓</span>
+                      <span>已儲存 {formatSavedTime()}</span>
+                    </>
+                  ) : null}
+                </div>
               )}
-            </Button>
+            </>
           )}
         </div>
       </div>
@@ -1220,7 +1387,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                       variant="outline"
                       size="sm"
                       onClick={() => setRequirement(`幫我做一個${example.prompt}`)}
-                      className="text-xs"
+                      className="text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
                     >
                       {example.emoji} {example.prompt}
                     </Button>
@@ -1399,7 +1566,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
               重新開始
             </Button>
             <Button onClick={handleGenerateQuestions} className="flex-1" size="lg">
-              進入需求澄清
+              進入需求確認
             </Button>
           </div>
         </>
@@ -1425,7 +1592,7 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
         <div className="space-y-4">
           <div className="p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
             <h2 className="text-lg font-semibold mb-1 text-blue-900 dark:text-blue-100">
-              🤔 需求澄清 ({Object.values(answers).filter((a) => {
+              🤔 需求確認 ({Object.values(answers).filter((a) => {
                 if (Array.isArray(a)) return a.length > 0
                 return typeof a === 'string' && a.trim()
               }).length}/{questions.length})

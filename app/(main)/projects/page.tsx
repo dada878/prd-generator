@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Project } from '@/lib/types'
 import { Card } from '@/components/ui/card'
@@ -16,11 +16,7 @@ export default function ProjectsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchProjects()
-  }, [])
-
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     try {
       setIsLoading(true)
       const response = await fetch('/api/projects')
@@ -30,7 +26,8 @@ export default function ProjectsPage() {
       }
 
       const data = await response.json()
-      setProjects(data.projects)
+      console.log('Fetched projects:', data.projects)
+      setProjects(data.projects || [])
     } catch (error) {
       console.error('Error fetching projects:', error)
       toast({
@@ -41,7 +38,11 @@ export default function ProjectsPage() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [toast])
+
+  useEffect(() => {
+    fetchProjects()
+  }, [fetchProjects])
 
   const handleDelete = async (id: string) => {
     if (!confirm('確定要刪除這個專案嗎？')) return

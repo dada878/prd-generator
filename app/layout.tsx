@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "需求澄清生成器 - PRD Generator",
+  title: "需求確認生成器 - PRD Generator",
   description: "透過 AI 問答自動生成產品需求文件（PRD）",
 };
 

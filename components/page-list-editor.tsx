@@ -4,30 +4,21 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Trash2, Plus, Edit, Save, X, RotateCcw } from 'lucide-react'
-
-interface PageBasicInfo {
-  id: string
-  name: string
-  urlPath: string
-  description: string
-  notes?: string
-  deleted?: boolean
-  deleteReason?: string
-}
+import { Page } from '@/lib/types'
 
 interface PageListEditorProps {
-  pages: PageBasicInfo[]
-  onUpdate: (pages: PageBasicInfo[]) => void
+  pages: Page[]
+  onUpdate: (pages: Page[]) => void
   onConfirm: () => void
 }
 
 export function PageListEditor({ pages, onUpdate, onConfirm }: PageListEditorProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<PageBasicInfo | null>(null)
+  const [editForm, setEditForm] = useState<Page | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
 
-  const handleEdit = (page: PageBasicInfo) => {
+  const handleEdit = (page: Page) => {
     setEditingId(page.id)
     setEditForm({ ...page })
   }
@@ -70,12 +61,14 @@ export function PageListEditor({ pages, onUpdate, onConfirm }: PageListEditorPro
   }
 
   const handleAdd = () => {
-    const newPage: PageBasicInfo = {
+    const newPage: Page = {
       id: `page-${Date.now()}`,
       name: '新頁面',
       urlPath: '/new-page',
       description: '頁面描述',
-      notes: ''
+      notes: '',
+      features: [],
+      layout: '',
     }
     onUpdate([...pages, newPage])
     handleEdit(newPage)

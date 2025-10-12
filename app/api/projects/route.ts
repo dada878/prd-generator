@@ -4,15 +4,18 @@ import { auth } from '@/auth'
 import { Project } from '@/lib/types'
 
 // GET all projects
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const session = await auth()
     const userId = session?.user?.email || 'anonymous'
+    console.log('Fetching projects for user:', userId)
 
     const projectsRef = db.collection('projects')
     const snapshot = await projectsRef
       .where('userId', '==', userId)
       .get()
+
+    console.log('Found', snapshot.docs.length, 'projects')
 
     const projects: Project[] = snapshot.docs
       .map(doc => {
@@ -88,6 +91,7 @@ export async function POST(request: NextRequest) {
     }
 
     const docRef = await db.collection('projects').add(projectData)
+    console.log('Project created with ID:', docRef.id, 'for user:', userId)
 
     return NextResponse.json({
       id: docRef.id,
