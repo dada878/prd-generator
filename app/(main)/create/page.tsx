@@ -12,6 +12,7 @@ import { TechStackTemplateCard, DEFAULT_TECH_STACK } from '@/components/tech-sta
 import { PRDModeSelector } from '@/components/prd-mode-selector'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Page, TechStackTemplate, Question, PRDMode } from '@/lib/types'
 import { Card } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
@@ -237,14 +238,23 @@ export default function CreatePage() {
     }
   }, [toast])
 
-  // 載入專案或從 URL 取得需求
+  // 載入專案或從 sessionStorage 取得需求
   useEffect(() => {
     if (projectId) {
       loadProject(projectId)
     } else {
-      const reqParam = searchParams.get('requirement')
-      if (reqParam) {
-        setRequirement(reqParam)
+      // 優先從 sessionStorage 讀取需求（支援換行和長文本）
+      const storedReq = sessionStorage.getItem('prd_requirement')
+      if (storedReq) {
+        setRequirement(storedReq)
+        // 讀取後清除，避免影響下次使用
+        sessionStorage.removeItem('prd_requirement')
+      } else {
+        // 向下相容：仍然支援從 URL 讀取（舊連結）
+        const reqParam = searchParams.get('requirement')
+        if (reqParam) {
+          setRequirement(reqParam)
+        }
       }
     }
   }, [projectId, searchParams, loadProject])
@@ -1354,18 +1364,22 @@ ${questions.map((q) => `問：${q.question}\n答：${formatAnswer(answers[q.id])
                 <label className="text-sm font-medium mb-2 block">
                   請描述你想做什麼產品或功能？
                 </label>
-                <Input
-                  placeholder="例如：我想做一個餐廳訂位網站"
+                <Textarea
+                  placeholder="例如：我想做一個餐廳訂位網站&#10;&#10;支援多行輸入，可以詳細描述你的需求..."
                   value={requirement}
                   onChange={(e) => setRequirement(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    // Ctrl/Cmd + Enter 送出
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
                       e.preventDefault()
                       handleGenerateInitialPRD()
                     }
                   }}
-                  className="text-base"
+                  className="text-base min-h-[100px] resize-y"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  💡 提示：按 Ctrl/Cmd + Enter 快速送出
+                </p>
               </div>
 
               <div>

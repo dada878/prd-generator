@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { ArrowRight } from 'lucide-react'
 
 export default function HomePage() {
@@ -13,7 +13,9 @@ export default function HomePage() {
 
   const handleStartCreating = () => {
     if (requirement.trim()) {
-      router.push(`/create?requirement=${encodeURIComponent(requirement)}`)
+      // 使用 sessionStorage 來傳遞需求，避免 URL 長度限制問題
+      sessionStorage.setItem('prd_requirement', requirement)
+      router.push('/create')
     } else {
       router.push('/create')
     }
@@ -31,18 +33,22 @@ export default function HomePage() {
 
         <Card className="p-8">
           <div className="space-y-4">
-            <Input
-              placeholder="寫下你的產品 idea..."
+            <Textarea
+              placeholder="寫下你的產品 idea...&#10;（支援換行，可輸入詳細需求）"
               value={requirement}
               onChange={(e) => setRequirement(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                // Ctrl/Cmd + Enter 送出
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
                   handleStartCreating()
                 }
               }}
-              className="text-lg h-14"
+              className="text-lg min-h-[120px] resize-none"
               autoFocus
             />
+            <div className="text-xs text-muted-foreground text-left">
+              💡 提示：按 Ctrl/Cmd + Enter 快速送出
+            </div>
             <Button
               onClick={handleStartCreating}
               size="lg"
