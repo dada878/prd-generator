@@ -19,6 +19,13 @@ const PRESET_TEMPLATES: (Omit<TechStackTemplate, 'id' | 'locked'> & { icon: stri
     excludedTech: ['Firebase Client SDK', 'Firebase Auth', 'Firebase Security Rules'],
   },
   {
+    icon: '💜',
+    name: 'Lovable',
+    description: '使用 Lovable Cloud 快速實現，簡單直接',
+    stack: ['Lovable Cloud'],
+    excludedTech: [],
+  },
+  {
     icon: '🎯',
     name: '不限制',
     description: '不限制任何技術堆疊，由 AI 自由推薦',
