@@ -68,7 +68,7 @@ export function TechStackTemplateCard({ template, onChange }: TechStackTemplateP
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {PRESET_TEMPLATES.map((preset, index) => {
             const isSelected = preset.name === '不限制'
               ? !template
